@@ -1,0 +1,9 @@
+{
+  "strategy": "snapshot",
+  "params": {
+    "proposal": "0x1234mkt",
+    "reward": "fixed",
+    "max": 6,
+    "min": 1
+  }
+}
