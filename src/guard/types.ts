@@ -1,3 +1,5 @@
+import { BigNumber } from "@ethersproject/bignumber";
+
 export const domain = {
   name: 'boost',
   version: '1',
@@ -14,7 +16,7 @@ export const claimTypes = {
 };
 
 export interface Claim {
-  boostId: number;
+  boostId: BigNumber;
   recipient: string;
-  amount: number;
+  amount: BigNumber;
 }
