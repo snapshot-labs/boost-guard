@@ -1,10 +1,16 @@
-import { BigNumber } from "@ethersproject/bignumber";
+import { BigNumber } from '@ethersproject/bignumber';
+
+const BOOST_VERSION = process.env.BOOST_VERSION || '1';
+const BOOST_CHAIN_ID = process.env.BOOST_CHAIN_ID || '1';
+const BOOST_CONTRACT = process.env.BOOST_CONTRACT;
+
+if (!BOOST_CONTRACT) throw new Error('BOOST_CONTRACT is not set');
 
 export const domain = {
   name: 'boost',
-  version: '1',
-  chainId: 4,
-  verifyingContract: '0x0000000000000000000000000000000000000000'
+  version: BOOST_VERSION,
+  chainId: BOOST_CHAIN_ID,
+  verifyingContract: BOOST_CONTRACT
 };
 
 export const claimTypes = {
