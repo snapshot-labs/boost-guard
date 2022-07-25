@@ -14,7 +14,13 @@ export const claimTypes = {
 };
 
 export interface Claim {
-  boostId: number;
+  boostId: string;
   recipient: string;
   amount: number;
+}
+
+export interface Strategy {
+  name: string;
+  tag: string;
+  params: Record<string, any>;
 }
