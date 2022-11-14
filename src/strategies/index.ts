@@ -1,1 +1,5 @@
-export * as snapshot from './snapshot';
+import snapshot from './snapshot';
+
+export default {
+  snapshot
+};
