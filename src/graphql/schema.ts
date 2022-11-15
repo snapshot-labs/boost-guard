@@ -1,3 +1,4 @@
+export default `
 scalar Any
 
 type Query {
@@ -39,3 +40,4 @@ type Status {
   guard: String!
   sig: String
 }
+`;
