@@ -2,7 +2,7 @@ import fetch from 'cross-fetch';
 import { BigNumber } from '@ethersproject/bignumber';
 
 const SNAPSHOT_HUB_URL = 'https://hub.snapshot.org/graphql';
-const SNAPSHOT_TESTNET_HUB_URL = 'https://testnet.snapshot.org/graphql';
+const SNAPSHOT_TESTNET_HUB_URL = 'https://testnet.hub.snapshot.org/graphql';
 
 export default async function strategy(recipient: string, params: any): Promise<string> {
   const url = params.env === 'testnet' ? SNAPSHOT_TESTNET_HUB_URL : SNAPSHOT_HUB_URL;
