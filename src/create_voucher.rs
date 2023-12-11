@@ -49,12 +49,10 @@ pub async fn create_voucher_handler(
         let response_body: GraphQLResponse<proposal_query::ResponseData> = res.json().await?;
         let proposal: proposal_query::ProposalQueryProposal = response_body
             .data
-            .ok_or_else(|| "missing data from the hub")?
+            .ok_or("missing data from the hub")?
             .proposal
-            .ok_or_else(|| "missing proposal data from the hub")?;
-        let proposal_type = proposal
-            .type_
-            .ok_or_else(|| "missing proposal type from the hub")?; // todo: error handling
+            .ok_or("missing proposal data from the hub")?;
+        let proposal_type = proposal.type_.ok_or("missing proposal type from the hub")?; // todo: error handling
 
         if (proposal_type != "single-choice") && (proposal_type != "basic") {
             return Err(ServerError::ErrorString(format!(

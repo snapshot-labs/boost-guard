@@ -13,9 +13,7 @@ async fn main() {
 }
 
 fn app() -> Router {
-    let routes = Router::new().route("/create_voucher", post(create_voucher_handler));
-
-    routes
+    Router::new().route("/create_voucher", post(create_voucher_handler))
 }
 
 #[cfg(test)]
