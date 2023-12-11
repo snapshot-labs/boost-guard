@@ -18,7 +18,7 @@ pub struct CreateVoucherResponse {
 pub struct CreateVoucherParams {
     pub proposal_id: String,
     pub voter_address: String,
-    pub boost_id: String,
+    pub boosts: Vec<(String, String)>,
 }
 
 #[derive(GraphQLQuery)]
@@ -38,33 +38,42 @@ pub async fn create_voucher_handler(
     Json(p): Json<Value>,
 ) -> Result<impl IntoResponse, ServerError> {
     let requests: Vec<CreateVoucherParams> = serde_json::from_value(p).expect("params");
+
+    let client = reqwest::Client::new();
     for request in requests {
-        let variables = proposal_query::Variables {
-            id: request.proposal_id.clone(),
-        };
-        let request_body = ProposalQuery::build_query(variables);
-
-        let client = reqwest::Client::new();
-        let res = client.post(HUB_URL).json(&request_body).send().await?;
-        let response_body: GraphQLResponse<proposal_query::ResponseData> = res.json().await?;
-        let proposal: proposal_query::ProposalQueryProposal = response_body
-            .data
-            .ok_or("missing data from the hub")?
-            .proposal
-            .ok_or("missing proposal data from the hub")?;
-        let proposal_type = proposal.type_.ok_or("missing proposal type from the hub")?; // todo: error handling
-
-        if (proposal_type != "single-choice") && (proposal_type != "basic") {
-            return Err(ServerError::ErrorString(format!(
-                "`{proposal_type:}` proposals are not eligible for boosting"
-            )));
-        }
-
-        // Query all boosts subgraphs to get
-        println!("proposal type: {}", proposal_type);
+        check_proposal_type(client.clone(), &request.proposal_id).await?;
     }
 
     // Query the hub to get info about the user's vote
     let response = CreateVoucherResponse::default();
     Ok(Json(response))
+}
+
+async fn check_proposal_type(
+    client: reqwest::Client,
+    proposal_id: &str,
+) -> Result<(), ServerError> {
+    let variables = proposal_query::Variables {
+        id: proposal_id.to_owned(),
+    };
+
+    let request_body = ProposalQuery::build_query(variables);
+
+    let res = client.post(HUB_URL).json(&request_body).send().await?;
+    let response_body: GraphQLResponse<proposal_query::ResponseData> = res.json().await?;
+    let proposal: proposal_query::ProposalQueryProposal = response_body
+        .data
+        .ok_or("missing data from the hub")?
+        .proposal
+        .ok_or("missing proposal data from the hub")?;
+
+    let proposal_type = proposal.type_.ok_or("missing proposal type from the hub")?;
+
+    if (proposal_type != "single-choice") && (proposal_type != "basic") {
+        return Err(ServerError::ErrorString(format!(
+            "`{proposal_type:}` proposals are not eligible for boosting"
+        )));
+    }
+
+    Ok(())
 }

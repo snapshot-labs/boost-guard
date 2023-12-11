@@ -31,7 +31,7 @@ mod tests {
             proposal_id: "0x5228df2f6851e31cf2d4cc4d3f1d46fc79fb33760caafbf6aae6a3321694aa01"
                 .to_string(),
             voter_address: "voter_address".to_string(),
-            boost_id: "boost".to_string(),
+            boosts: vec![("boost".to_string(), "0x42".to_string())],
         };
 
         let response = app
@@ -58,7 +58,7 @@ mod tests {
             proposal_id: "0x2f488ec3a0b9b5d731812395f2aa99718df7d380b6c6c0539fec16ae53b3e1fc"
                 .to_string(),
             voter_address: "voter_address".to_string(),
-            boost_id: "boost".to_string(),
+            boosts: vec![("boost".to_string(), "0x42".to_string())],
         };
 
         let response = app
