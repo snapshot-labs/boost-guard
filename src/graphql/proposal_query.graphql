@@ -1,0 +1,11 @@
+query ProposalQuery($id: String!) {
+  proposal(
+    id: $id
+  ) {
+    type
+    choices
+    start
+    end
+    snapshot
+  }
+}
