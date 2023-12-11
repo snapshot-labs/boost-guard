@@ -11,9 +11,7 @@ pub enum ServerError {
 
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
-        let body = match self {
-            ServerError::ErrorString(s) => s,
-        };
+        let ServerError::ErrorString(body) = self;
 
         // its often easiest to implement `IntoResponse` by calling other implementations
         (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
