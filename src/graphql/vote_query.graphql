@@ -1,0 +1,11 @@
+query VotesQuery($voter: String!, $proposal: String!) {
+  votes (
+    where: {
+      voter: $voter
+      proposal: $proposal
+    }
+  ) {
+    choice
+    vp
+  }
+}

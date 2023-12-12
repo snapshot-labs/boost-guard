@@ -28,9 +28,9 @@ mod tests {
     async fn test_create_voucher_handler() {
         let app = super::app();
         let query = CreateVoucherParams {
-            proposal_id: "0x5228df2f6851e31cf2d4cc4d3f1d46fc79fb33760caafbf6aae6a3321694aa01"
+            proposal_id: "0xaada75567aba0e185bab3705a485e53747dc55c342180106020e64ff96862223"
                 .to_string(),
-            voter_address: "voter_address".to_string(),
+            voter_address: "0xe5107dee9CcC8054210FF6129cE15Eaa5bbcB1c0".to_string(), // expected vp: 598.4
             boosts: vec![("boost".to_string(), "0x42".to_string())],
         };
 
@@ -49,6 +49,7 @@ mod tests {
         let _response: CreateVoucherResponse =
             serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
                 .unwrap();
+        println!("{:?}", _response);
     }
 
     #[tokio::test]

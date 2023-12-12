@@ -29,6 +29,17 @@ pub struct CreateVoucherParams {
 )]
 struct ProposalQuery;
 
+// TODO: only works for basic ? idk
+type Any = u8;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "src/graphql/schema.graphql",
+    query_path = "src/graphql/vote_query.graphql",
+    response_derives = "Debug"
+)]
+struct VotesQuery;
+
 // Receives proposal_id, voter_address, and boost_id
 // Queries graph to get boost info?
 // Have to check proposal's type: needs to be single-choice or basic, else error -> DONE
@@ -41,12 +52,53 @@ pub async fn create_voucher_handler(
 
     let client = reqwest::Client::new();
     for request in requests {
-        check_proposal_type(client.clone(), &request.proposal_id).await?;
+        println!("{request:?}");
+        check_proposal_type(client.clone(), &request.proposal_id).await?; // TODO: refactor, use `get_proposal_info` and extrat proposal_type + total voting power
+        let (_voting_power, choice) =
+            get_voter_info(client.clone(), &request.voter_address, &request.proposal_id).await?;
+
+        let _cap = 2; // TODO: get this from ... somewhere?
+        let boosted_choice = 2; // TODO: get this from ... somewhere?
+
+        if choice != boosted_choice {
+            return Err(ServerError::ErrorString(
+                "voter is not eligible: choice is not boosted".to_string(),
+            ));
+        }
     }
 
     // Query the hub to get info about the user's vote
     let response = CreateVoucherResponse::default();
     Ok(Json(response))
+}
+
+// Returns (voting_power, choice)
+async fn get_voter_info(
+    client: reqwest::Client,
+    voter_address: &str,
+    proposal_id: &str,
+) -> Result<(f64, u8), ServerError> {
+    let variables = votes_query::Variables {
+        voter: voter_address.to_owned(),
+        proposal: proposal_id.to_owned(),
+    };
+
+    let request_body = VotesQuery::build_query(variables);
+
+    let res = client.post(HUB_URL).json(&request_body).send().await?;
+    let response_body: GraphQLResponse<votes_query::ResponseData> = res.json().await?;
+    let votes = response_body
+        .data
+        .ok_or("missing data from the hub")?
+        .votes
+        .ok_or("missing votes fomr the hub")?;
+
+    let vote = votes
+        .into_iter()
+        .next()
+        .ok_or("missing vote from the hub")?
+        .ok_or("missing first vote from the hub?")?;
+    Ok((vote.vp.ok_or("missing vp from the hub")?, vote.choice))
 }
 
 async fn check_proposal_type(
