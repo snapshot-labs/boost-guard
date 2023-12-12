@@ -44,13 +44,11 @@ jobs:
       - name: Update local toolchain
         run: |
           rustup update
-          rustup component add clippy
 
       - name: Toolchain info
         run: |
           cargo --version --verbose
           rustc --version
-          cargo clippy --version          
 
       - name: Test
         run: |
@@ -65,13 +63,11 @@ jobs:
       - name: Update local toolchain
         run: |
           rustup update
-          rustup component add clippy
 
       - name: Toolchain info
         run: |
           cargo --version --verbose
           rustc --version
-          cargo clippy --version          
 
       - name: Build
         run: |
