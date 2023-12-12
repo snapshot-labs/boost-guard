@@ -5,6 +5,8 @@ use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+// TODO: check with BIG voting power (f64 precision?)
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CreateVoucherResponse {
     // TODO: should we include ID of request?
@@ -53,23 +55,71 @@ pub async fn create_voucher_handler(
     let client = reqwest::Client::new();
     for request in requests {
         println!("{request:?}");
-        check_proposal_type(client.clone(), &request.proposal_id).await?; // TODO: refactor, use `get_proposal_info` and extrat proposal_type + total voting power
-        let (_voting_power, choice) =
+        let (proposal_type, proposal_score) =
+            get_proposal_info(client.clone(), &request.proposal_id).await?;
+        let (voting_power, choice) =
             get_voter_info(client.clone(), &request.voter_address, &request.proposal_id).await?;
 
-        let _cap = 2; // TODO: get this from ... somewhere?
-        let boosted_choice = 2; // TODO: get this from ... somewhere?
+        let cap = None; // TODO: get this from ... somewhere?
+        let boosted_choice = BoostStrategy::Incentive; // TODO: get this from ... somewhere?
+        let boost_pool = 100_f64;
 
-        if choice != boosted_choice {
-            return Err(ServerError::ErrorString(
-                "voter is not eligible: choice is not boosted".to_string(),
-            ));
-        }
+        // ensure proposal has ended
+        validate_type(&proposal_type)?;
+        validate_choice(choice, boosted_choice)?;
+        let _reward = compute_user_reward(boost_pool, voting_power, proposal_score, cap);
+
+        // TODO: check cap
     }
 
     // Query the hub to get info about the user's vote
     let response = CreateVoucherResponse::default();
     Ok(Json(response))
+}
+
+fn compute_user_reward(
+    boost_pool: f64,
+    voting_power: f64,
+    proposal_score: f64,
+    cap: Option<f64>,
+) -> f64 {
+    let reward = voting_power * boost_pool / proposal_score;
+
+    if let Some(_cap) = cap {
+        todo!("implement cap");
+    } else {
+        reward
+    }
+}
+
+fn validate_type(proposal_type: &str) -> Result<(), ServerError> {
+    if (proposal_type != "single-choice") && (proposal_type != "basic") {
+        Err(ServerError::ErrorString(format!(
+            "`{proposal_type:}` proposals are not eligible for boosting"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+pub enum BoostStrategy {
+    Incentive, // Everyone who votes is eligible, regardless of choice
+    Bribe(u8), // Only those who voted for the specific choice are eligible
+}
+
+fn validate_choice(choice: u8, boost_strategy: BoostStrategy) -> Result<(), ServerError> {
+    match boost_strategy {
+        BoostStrategy::Incentive => Ok(()),
+        BoostStrategy::Bribe(boosted_choice) => {
+            if choice != boosted_choice {
+                Err(ServerError::ErrorString(
+                    "voter is not eligible: choice is not boosted".to_string(),
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
 }
 
 // Returns (voting_power, choice)
@@ -101,10 +151,10 @@ async fn get_voter_info(
     Ok((vote.vp.ok_or("missing vp from the hub")?, vote.choice))
 }
 
-async fn check_proposal_type(
+async fn get_proposal_info(
     client: reqwest::Client,
     proposal_id: &str,
-) -> Result<(), ServerError> {
+) -> Result<(String, f64), ServerError> {
     let variables = proposal_query::Variables {
         id: proposal_id.to_owned(),
     };
@@ -120,12 +170,9 @@ async fn check_proposal_type(
         .ok_or("missing proposal data from the hub")?;
 
     let proposal_type = proposal.type_.ok_or("missing proposal type from the hub")?;
+    let proposal_score = proposal
+        .scores_total
+        .ok_or("missing proposal score from the hub")?;
 
-    if (proposal_type != "single-choice") && (proposal_type != "basic") {
-        return Err(ServerError::ErrorString(format!(
-            "`{proposal_type:}` proposals are not eligible for boosting"
-        )));
-    }
-
-    Ok(())
+    Ok((proposal_type, proposal_score))
 }
