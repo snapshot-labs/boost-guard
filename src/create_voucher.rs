@@ -51,7 +51,7 @@ struct VotesQuery;
 pub async fn create_voucher_handler(
     Json(p): Json<Value>,
 ) -> Result<impl IntoResponse, ServerError> {
-    let requests: Vec<CreateVoucherParams> = serde_json::from_value(p).expect("params");
+    let requests: Vec<CreateVoucherParams> = serde_json::from_value(p)?;
 
     let client = reqwest::Client::new();
     for request in requests {
@@ -116,6 +116,7 @@ fn validate_type(type_: &str) -> Result<(), ServerError> {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum BoostStrategy {
     Incentive, // Everyone who votes is eligible, regardless of choice
     Bribe(u8), // Only those who voted for the specific choice are eligible
