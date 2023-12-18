@@ -1,4 +1,6 @@
 name: CI
+env:
+  PRIVATE_KEY: '0xafdfd9c3d2095ef696594f6cedcae59e72dcd697e2a7521b1578140422a4f890' # This is a test private key
 
 # This workflow run tests and build for each push
 
