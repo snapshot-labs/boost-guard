@@ -1,7 +1,7 @@
 use axum::response::{IntoResponse, Response};
 use hyper::http::StatusCode;
 
-pub mod create_voucher;
+pub mod routes;
 pub mod signatures;
 
 const HUB_URL: &str = "https://testnet.hub.snapshot.org/graphql";
@@ -23,4 +23,10 @@ impl<T: std::fmt::Debug> From<T> for ServerError {
     fn from(error: T) -> Self {
         ServerError::ErrorString(format!("{:?}", error))
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct State {
+    pub client: reqwest::Client,
+    pub wallet: ethers::signers::LocalWallet,
 }
