@@ -2,6 +2,7 @@ use axum::response::{IntoResponse, Response};
 use hyper::http::StatusCode;
 
 pub mod create_voucher;
+pub mod signatures;
 
 const HUB_URL: &str = "https://testnet.hub.snapshot.org/graphql";
 
