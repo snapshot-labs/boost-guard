@@ -31,7 +31,7 @@ mod tests {
             proposal_id: "0xaada75567aba0e185bab3705a485e53747dc55c342180106020e64ff96862223"
                 .to_string(),
             voter_address: "0xe5107dee9CcC8054210FF6129cE15Eaa5bbcB1c0".to_string(), // expected vp: 598.4
-            boosts: vec![("boost".to_string(), "0x42".to_string())],
+            boosts: vec![("123452".to_string(), "0x42".to_string())],
         };
 
         let response = app
@@ -40,7 +40,7 @@ mod tests {
                     .method(http::Method::POST)
                     .uri("/create_voucher")
                     .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-                    .body(Body::from(serde_json::to_vec(&[&query, &query]).unwrap()))
+                    .body(Body::from(serde_json::to_vec(&query).unwrap()))
                     .unwrap(),
             )
             .await
@@ -49,7 +49,6 @@ mod tests {
         let _response: CreateVoucherResponse =
             serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
                 .unwrap();
-        println!("{:?}", _response);
     }
 
     #[tokio::test]
@@ -59,7 +58,7 @@ mod tests {
             proposal_id: "0x2f488ec3a0b9b5d731812395f2aa99718df7d380b6c6c0539fec16ae53b3e1fc"
                 .to_string(),
             voter_address: "voter_address".to_string(),
-            boosts: vec![("boost".to_string(), "0x42".to_string())],
+            boosts: vec![("0x1234".to_string(), "0x42".to_string())],
         };
 
         let response = app

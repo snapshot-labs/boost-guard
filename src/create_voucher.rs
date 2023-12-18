@@ -1,10 +1,12 @@
+use crate::signatures::ClaimConfig;
 use crate::{ServerError, HUB_URL};
 use ::axum::extract::Json;
 use axum::response::IntoResponse;
 use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::time::SystemTime;
+use std::env;
+use std::{str::FromStr, time::SystemTime};
 
 // TODO: check with BIG voting power (f64 precision?)
 
@@ -21,7 +23,7 @@ pub struct CreateVoucherResponse {
 pub struct CreateVoucherParams {
     pub proposal_id: String,
     pub voter_address: String,
-    pub boosts: Vec<(String, String)>,
+    pub boosts: Vec<(String, String)>, // Vec<(boost_id, chain_id)>
 }
 
 #[derive(GraphQLQuery)]
@@ -43,33 +45,36 @@ type Any = u8;
 )]
 struct VotesQuery;
 
-// Receives proposal_id, voter_address, and boost_id
-// Queries graph to get boost info?
-// Have to check proposal's type: needs to be single-choice or basic, else error -> DONE
-// Have to check
-// Boost info needed: eligiblity_criteria (incentive or bribe?)
 pub async fn create_voucher_handler(
     Json(p): Json<Value>,
 ) -> Result<impl IntoResponse, ServerError> {
-    let requests: Vec<CreateVoucherParams> = serde_json::from_value(p)?;
-
+    let request: CreateVoucherParams = serde_json::from_value(p)?;
+    let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
+    let wallet = ethers::signers::LocalWallet::from_str(&private_key)?; // todo check hex
     let client = reqwest::Client::new();
-    for request in requests {
-        let proposal = get_proposal_info(client.clone(), &request.proposal_id).await?;
-        let (voting_power, choice) =
-            get_voter_info(client.clone(), &request.voter_address, &request.proposal_id).await?;
 
+    let proposal = get_proposal_info(&client, &request.proposal_id).await?;
+    let vote = get_vote_info(&client, &request.voter_address, &request.proposal_id).await?;
+
+    validate_end_time(proposal.end)?;
+    validate_type(&proposal.type_)?;
+
+    let mut signatures = Vec::with_capacity(request.boosts.len());
+    for (boost_id, chain_id) in request.boosts {
         let cap = None; // TODO: get this from ... somewhere?
         let boosted_choice = BoostStrategy::Incentive; // TODO: get this from ... somewhere?
-        let boost_pool = 100_f64; // TODO: ge tthis from... somewhere?
+        let pool: u128 = 100; // TODO: get this from... somewhere?
+        let decimals: i32 = 18; // TODO: get this from... somewhere?
 
-        validate_end_time(proposal.end)?;
-        validate_type(&proposal.type_)?;
-        validate_choice(choice, boosted_choice)?;
-
-        let _reward = compute_user_reward(boost_pool, voting_power, proposal.score, cap);
-
+        validate_choice(vote.choice, boosted_choice)?;
         // TODO: check cap
+
+        let voting_power = vote.voting_power * 10f64.powi(decimals);
+        let reward = compute_user_reward(pool, voting_power as u128, proposal.score, cap);
+
+        let sig = ClaimConfig::new(&boost_id, &chain_id, &request.voter_address, reward)?
+            .create_signature(&wallet)?; // TODO: decide if we should error the whole request or only this specific boost?
+        signatures.push(sig);
     }
 
     // Query the hub to get info about the user's vote
@@ -78,12 +83,12 @@ pub async fn create_voucher_handler(
 }
 
 fn compute_user_reward(
-    boost_pool: f64,
-    voting_power: f64,
-    proposal_score: f64,
+    pool: u128,
+    voting_power: u128,
+    proposal_score: u128,
     cap: Option<f64>,
-) -> f64 {
-    let reward = voting_power * boost_pool / proposal_score;
+) -> u128 {
+    let reward = voting_power * pool / proposal_score;
 
     if let Some(_cap) = cap {
         todo!("implement cap");
@@ -137,12 +142,17 @@ fn validate_choice(choice: u8, boost_strategy: BoostStrategy) -> Result<(), Serv
     }
 }
 
-// Returns (voting_power, choice)
-async fn get_voter_info(
-    client: reqwest::Client,
+#[derive(Debug)]
+struct Vote {
+    voting_power: f64,
+    choice: u8,
+}
+
+async fn get_vote_info(
+    client: &reqwest::Client,
     voter_address: &str,
     proposal_id: &str,
-) -> Result<(f64, u8), ServerError> {
+) -> Result<Vote, ServerError> {
     let variables = votes_query::Variables {
         voter: voter_address.to_owned(),
         proposal: proposal_id.to_owned(),
@@ -163,13 +173,17 @@ async fn get_voter_info(
         .next()
         .ok_or("missing vote from the hub")?
         .ok_or("missing first vote from the hub?")?;
-    Ok((vote.vp.ok_or("missing vp from the hub")?, vote.choice))
+
+    Ok(Vote {
+        voting_power: vote.vp.ok_or("missing vp from the hub")?,
+        choice: vote.choice,
+    })
 }
 
 #[derive(Debug)]
 struct Proposal {
     type_: String,
-    score: f64,
+    score: u128,
     end: u64,
 }
 
@@ -180,7 +194,7 @@ impl TryFrom<proposal_query::ProposalQueryProposal> for Proposal {
         let proposal_type = proposal.type_.ok_or("missing proposal type from the hub")?;
         let proposal_score = proposal
             .scores_total
-            .ok_or("missing proposal score from the hub")?;
+            .ok_or("missing proposal score from the hub")? as u128;
         let proposal_end = proposal.end.try_into()?;
 
         Ok(Proposal {
@@ -192,7 +206,7 @@ impl TryFrom<proposal_query::ProposalQueryProposal> for Proposal {
 }
 
 async fn get_proposal_info(
-    client: reqwest::Client,
+    client: &reqwest::Client,
     proposal_id: &str,
 ) -> Result<Proposal, ServerError> {
     let variables = proposal_query::Variables {
@@ -210,3 +224,5 @@ async fn get_proposal_info(
         .ok_or("missing proposal data from the hub")?;
     Proposal::try_from(proposal_query)
 }
+
+// TODO: add signature testing
