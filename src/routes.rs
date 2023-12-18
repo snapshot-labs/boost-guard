@@ -1,26 +1,34 @@
 use crate::signatures::ClaimConfig;
+use crate::State;
 use crate::{ServerError, HUB_URL};
 use ::axum::extract::Json;
 use axum::response::IntoResponse;
+use axum::Extension;
 use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::env;
-use std::{str::FromStr, time::SystemTime};
+use std::time::SystemTime;
 
 // TODO: check with BIG voting power (f64 precision?)
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct CreateVoucherResponse {
     // TODO: should we include ID of request?
     pub signature: String,
+    pub chain_id: String,
     pub boost_id: String,
-    pub user: String,
-    pub proposal_id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct CreateVoucherParams {
+pub struct GetRewardsResponse {
+    // TODO: should we include ID of request?
+    pub reward: String,
+    pub chain_id: String,
+    pub boost_id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct QueryParams {
     pub proposal_id: String,
     pub voter_address: String,
     pub boosts: Vec<(String, String)>, // Vec<(boost_id, chain_id)>
@@ -45,21 +53,20 @@ type Any = u8;
 )]
 struct VotesQuery;
 
+// todo: docs
 pub async fn create_voucher_handler(
+    Extension(state): Extension<State>,
     Json(p): Json<Value>,
 ) -> Result<impl IntoResponse, ServerError> {
-    let request: CreateVoucherParams = serde_json::from_value(p)?;
-    let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
-    let wallet = ethers::signers::LocalWallet::from_str(&private_key)?; // todo check hex
-    let client = reqwest::Client::new();
+    let request: QueryParams = serde_json::from_value(p)?;
 
-    let proposal = get_proposal_info(&client, &request.proposal_id).await?;
-    let vote = get_vote_info(&client, &request.voter_address, &request.proposal_id).await?;
+    let proposal = get_proposal_info(&state.client, &request.proposal_id).await?;
+    let vote = get_vote_info(&state.client, &request.voter_address, &request.proposal_id).await?;
 
     validate_end_time(proposal.end)?;
     validate_type(&proposal.type_)?;
 
-    let mut signatures = Vec::with_capacity(request.boosts.len());
+    let mut response = Vec::with_capacity(request.boosts.len());
     for (boost_id, chain_id) in request.boosts {
         let cap = None; // TODO: get this from ... somewhere?
         let boosted_choice = BoostStrategy::Incentive; // TODO: get this from ... somewhere?
@@ -72,13 +79,52 @@ pub async fn create_voucher_handler(
         let voting_power = vote.voting_power * 10f64.powi(decimals);
         let reward = compute_user_reward(pool, voting_power as u128, proposal.score, cap);
 
-        let sig = ClaimConfig::new(&boost_id, &chain_id, &request.voter_address, reward)?
-            .create_signature(&wallet)?; // TODO: decide if we should error the whole request or only this specific boost?
-        signatures.push(sig);
+        let signature = ClaimConfig::new(&boost_id, &chain_id, &request.voter_address, reward)?
+            .create_signature(&state.wallet)?; // TODO: decide if we should error the whole request or only this specific boost?
+        response.push(CreateVoucherResponse {
+            signature: format!("0x{}", signature),
+            chain_id,
+            boost_id,
+        });
     }
 
-    // Query the hub to get info about the user's vote
-    let response = CreateVoucherResponse::default();
+    Ok(Json(response))
+}
+
+// TODO: unify get_rewards_handle and create_voucher_handler
+
+pub async fn get_rewards_handler(
+    Extension(state): Extension<State>,
+    Json(p): Json<Value>,
+) -> Result<impl IntoResponse, ServerError> {
+    let request: QueryParams = serde_json::from_value(p)?;
+
+    let proposal = get_proposal_info(&state.client, &request.proposal_id).await?;
+    let vote = get_vote_info(&state.client, &request.voter_address, &request.proposal_id).await?;
+
+    validate_end_time(proposal.end)?;
+    validate_type(&proposal.type_)?;
+
+    let mut response = Vec::with_capacity(request.boosts.len());
+    for (boost_id, chain_id) in request.boosts {
+        let cap = None; // TODO: get this from ... somewhere?
+        let boosted_choice = BoostStrategy::Incentive; // TODO: get this from ... somewhere?
+        let pool: u128 = 100; // TODO: get this from... somewhere?
+        let decimals: i32 = 18; // TODO: get this from... somewhere?
+
+        validate_choice(vote.choice, boosted_choice)?;
+        // TODO: check cap
+
+        let voting_power = vote.voting_power * 10f64.powi(decimals);
+        let reward = compute_user_reward(pool, voting_power as u128, proposal.score, cap);
+
+        response.push(GetRewardsResponse {
+            reward: reward.to_string(),
+            chain_id,
+            boost_id,
+        });
+    }
+
     Ok(Json(response))
 }
 
