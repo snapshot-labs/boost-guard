@@ -1,5 +1,5 @@
 use axum::routing::post;
-use axum::Router;
+use axum::{Extension, Router};
 use boost_guard::create_voucher::create_voucher_handler;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
@@ -13,7 +13,10 @@ async fn main() {
 }
 
 fn app() -> Router {
-    Router::new().route("/create_voucher", post(create_voucher_handler))
+    let client = reqwest::Client::new();
+    Router::new()
+        .route("/create_voucher", post(create_voucher_handler))
+        .layer(Extension(client))
 }
 
 #[cfg(test)]

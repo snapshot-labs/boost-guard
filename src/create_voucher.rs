@@ -2,6 +2,7 @@ use crate::signatures::ClaimConfig;
 use crate::{ServerError, HUB_URL};
 use ::axum::extract::Json;
 use axum::response::IntoResponse;
+use axum::Extension;
 use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -46,12 +47,12 @@ struct VotesQuery;
 
 // todo: docs
 pub async fn create_voucher_handler(
+    Extension(client): Extension<reqwest::Client>,
     Json(p): Json<Value>,
 ) -> Result<impl IntoResponse, ServerError> {
     let request: CreateVoucherParams = serde_json::from_value(p)?;
     let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
     let wallet = ethers::signers::LocalWallet::from_str(&private_key)?; // todo check hex
-    let client = reqwest::Client::new();
 
     let proposal = get_proposal_info(&client, &request.proposal_id).await?;
     let vote = get_vote_info(&client, &request.voter_address, &request.proposal_id).await?;
