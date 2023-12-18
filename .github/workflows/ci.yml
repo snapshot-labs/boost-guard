@@ -31,11 +31,6 @@ jobs:
           cargo fmt -- --check
           cargo clippy -- -D warnings -D clippy::perf
 
-      - name: Test
-        run: |
-          cargo check
-          cargo test --all          
-
   test:
     runs-on: ubuntu-latest
     steps:
