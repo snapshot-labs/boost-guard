@@ -10,13 +10,12 @@ use std::{str::FromStr, time::SystemTime};
 
 // TODO: check with BIG voting power (f64 precision?)
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct CreateVoucherResponse {
     // TODO: should we include ID of request?
     pub signature: String,
+    pub chain_id: String,
     pub boost_id: String,
-    pub user: String,
-    pub proposal_id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -45,6 +44,7 @@ type Any = u8;
 )]
 struct VotesQuery;
 
+// todo: docs
 pub async fn create_voucher_handler(
     Json(p): Json<Value>,
 ) -> Result<impl IntoResponse, ServerError> {
@@ -59,7 +59,7 @@ pub async fn create_voucher_handler(
     validate_end_time(proposal.end)?;
     validate_type(&proposal.type_)?;
 
-    let mut signatures = Vec::with_capacity(request.boosts.len());
+    let mut response = Vec::with_capacity(request.boosts.len());
     for (boost_id, chain_id) in request.boosts {
         let cap = None; // TODO: get this from ... somewhere?
         let boosted_choice = BoostStrategy::Incentive; // TODO: get this from ... somewhere?
@@ -72,13 +72,15 @@ pub async fn create_voucher_handler(
         let voting_power = vote.voting_power * 10f64.powi(decimals);
         let reward = compute_user_reward(pool, voting_power as u128, proposal.score, cap);
 
-        let sig = ClaimConfig::new(&boost_id, &chain_id, &request.voter_address, reward)?
+        let signature = ClaimConfig::new(&boost_id, &chain_id, &request.voter_address, reward)?
             .create_signature(&wallet)?; // TODO: decide if we should error the whole request or only this specific boost?
-        signatures.push(sig);
+        response.push(CreateVoucherResponse {
+            signature: format!("0x{}", signature),
+            chain_id,
+            boost_id,
+        });
     }
 
-    // Query the hub to get info about the user's vote
-    let response = CreateVoucherResponse::default();
     Ok(Json(response))
 }
 

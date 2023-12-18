@@ -46,9 +46,10 @@ mod tests {
             .await
             .unwrap();
 
-        let _response: CreateVoucherResponse =
+        let _response: Vec<CreateVoucherResponse> =
             serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
                 .unwrap();
+        println!("{:?}", _response);
     }
 
     #[tokio::test]
