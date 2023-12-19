@@ -1,0 +1,14 @@
+name: boost-guard
+region: nyc
+services:
+  - dockerfile_path: Dockerfile
+    github:
+      branch: main
+      deploy_on_push: true
+      repo: snapshotlabs/boost-guard
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    name: boost-guard
+    routes:
+      - path: /
