@@ -6,5 +6,4 @@ RUN rustup override set nightly; \
 
 FROM debian:buster-slim
 COPY --from=builder /usr/local/cargo/bin/boost-guard /usr/local/bin/boost-guard
-ENV ROCKET_PORT 8080
-CMD myapp
+CMD boost-guard
