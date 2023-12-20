@@ -5,7 +5,7 @@ services:
     github:
       branch: main
       deploy_on_push: true
-      repo: snapshotlabs/boost-guard
+      repo: pscott/boost-guard
     http_port: 8080
     instance_count: 1
     instance_size_slug: basic-xxs

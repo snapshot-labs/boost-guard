@@ -1,37 +1,36 @@
-FROM rust:1.74.1 as builder
+FROM rust:1 AS chef
+RUN cargo install cargo-chef
+WORKDIR /app
 
-RUN USER=root cargo new --bin boost-guard
+FROM chef AS planner
+COPY ./Cargo.toml ./Cargo.lock ./
+COPY ./src ./src
+RUN cargo chef prepare --recipe-path recipe.json
 
-WORKDIR /boost-guard
+FROM chef AS builder
+COPY --from=planner /app/recipe.json .
+RUN cargo chef cook --release --recipe-path recipe.json
+COPY . .
+RUN cargo build --release --bin boost-guard
 
-COPY ./Cargo.toml ./Cargo.toml
-RUN cargo build --release
-RUN rm src/*.rs
+# We do not need the Rust toolchain to run the binary!
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update && apt-get install libssl-dev libssl3
+WORKDIR /app
+COPY --from=builder /app/target/release/boost-guard /usr/local/bin
+# todo: remove
+ENV PRIVATE_KEY 0xafdfd9c3d2095ef696594f6cedcae59e72dcd697e2a7521b1578140422a4f890
+ENTRYPOINT ["/usr/local/bin/boost-guard"]
 
-ADD . ./
+# RUN apt-get update \
+#     && apt-get install -y ca-certificates tzdata \
+#     && rm -rf /var/lib/apt/lists/*
 
-RUN rm ./target/release/deps/boost_guard*
+# ENV TZ=Etc/UTC \
+#     USER=appuser
 
-RUN cargo build --release
+# RUN groupadd ${USER} \
+#     && useradd -g ${USER} ${USER} && \
+#     chown -R ${USER}:${USER} /bin
 
-FROM debian:buster-slim as runtime
-
-WORKDIR /bin
-
-# Copy from builder and rename to 'server'
-COPY --from=builder /boost-guard/target/release/boost-guard ./server
-
-RUN apt-get update \
-    && apt-get install -y ca-certificates tzdata \
-    && rm -rf /var/lib/apt/lists/*
-
-ENV TZ=Etc/UTC \
-    USER=appuser
-
-RUN groupadd ${USER} \
-    && useradd -g ${USER} ${USER} && \
-    chown -R ${USER}:${USER} /bin
-
-USER ${USER}
-
-ENTRYPOINT ["./server"]
+# USER ${USER}
