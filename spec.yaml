@@ -6,7 +6,7 @@ services:
       branch: main
       deploy_on_push: true
       repo: pscott/boost-guard
-    http_port: 80
+    http_port: 8080
     health_check:
       http_path: /health
     instance_count: 1
