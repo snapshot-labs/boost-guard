@@ -1,6 +1,6 @@
 use axum::routing::{get, post};
 use axum::{Extension, Router};
-use boost_guard::routes::{create_voucher_handler, get_rewards_handler, health_handler, forward_handler};
+use boost_guard::routes::{create_vouchers_handler, get_rewards_handler, health_handler};
 use std::env;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -27,10 +27,9 @@ fn app() -> Router {
     let state = boost_guard::State { client, wallet };
 
     Router::new()
-        .route("/create-voucher", post(create_voucher_handler)) // todo: create-voucherS
+        .route("/create-vouchers", post(create_vouchers_handler)) // todo: create-voucherS
         .route("/get-rewards", post(get_rewards_handler))
         .route("/health", get(health_handler))
-        .route("/forward", post(forward_handler))
         .layer(Extension(state))
 }
 
@@ -38,12 +37,12 @@ fn app() -> Router {
 mod tests {
     use axum::body::Body;
     use axum::http;
-    use boost_guard::routes::{CreateVoucherResponse, GetRewardsResponse, QueryParams, ForwardParams};
+    use boost_guard::routes::{CreateVoucherResponse, GetRewardsResponse, QueryParams};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
     #[tokio::test]
-    async fn test_create_voucher() {
+    async fn test_create_vouchers() {
         let app = super::app();
         let query = QueryParams {
             proposal_id: "0xaada75567aba0e185bab3705a485e53747dc55c342180106020e64ff96862223"
@@ -56,7 +55,7 @@ mod tests {
             .oneshot(
                 http::Request::builder()
                     .method(http::Method::POST)
-                    .uri("/create-voucher")
+                    .uri("/create-vouchers")
                     .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
                     .body(Body::from(serde_json::to_vec(&query).unwrap()))
                     .unwrap(),
@@ -112,7 +111,7 @@ mod tests {
             .oneshot(
                 http::Request::builder()
                     .method(http::Method::POST)
-                    .uri("/create-voucher")
+                    .uri("/create-vouchers")
                     .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
                     .body(Body::from(serde_json::to_vec(&[&query, &query]).unwrap()))
                     .unwrap(),
@@ -121,8 +120,6 @@ mod tests {
             .unwrap();
 
         assert!(response.status() == http::StatusCode::INTERNAL_SERVER_ERROR);
-        let s = response.into_body().collect().await.unwrap().to_bytes();
-        println!("{s:?}");
     }
 
     #[tokio::test]
@@ -140,27 +137,4 @@ mod tests {
             .unwrap();
         assert!(response.status() == http::StatusCode::OK);
     }
-
-    #[tokio::test]
-    async fn test_forwarder() {
-        let app = super::app();
-        let query = ForwardParams {
-            to: "https://sh5.co/".to_string(),
-        };
-
-        let response = app
-            .oneshot(
-                http::Request::builder()
-                    .method(http::Method::POST)
-                    .uri("/forward")
-                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-                    .body(Body::from(serde_json::to_vec(&query).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        println!("{:?}", response.into_body().collect().await.unwrap().to_bytes());
-    }
-
 }

@@ -12,11 +12,6 @@ use std::time::SystemTime;
 // TODO: check with BIG voting power (f64 precision?)
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct ForwardParams {
-    pub to: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
 pub struct CreateVoucherResponse {
     // TODO: should we include ID of request?
     pub signature: String,
@@ -60,7 +55,7 @@ struct VotesQuery;
 
 // todo: docs
 // todo: check that proposal has ended
-pub async fn create_voucher_handler(
+pub async fn create_vouchers_handler(
     Extension(state): Extension<State>,
     Json(p): Json<Value>,
 ) -> Result<impl IntoResponse, ServerError> {
@@ -280,20 +275,6 @@ async fn get_proposal_info(
 
 pub async fn health_handler() -> Result<impl IntoResponse, ServerError> {
     Ok(axum::response::Html("Healthy!"))
-}
-
-pub async fn forward_handler(
-    Extension(state): Extension<State>,
-    Json(p): Json<Value>,
-) -> Result<impl IntoResponse, ServerError> {
-    println!("1");
-    let params: ForwardParams = serde_json::from_value(p)?;
-
-    println!("2");
-    let res = state.client.get(params.to).send().await?;
-    println!("3");
-    let b = res.text().await.unwrap();
-    Ok(axum::response::Html(b))
 }
 
 // TODO: add signature testing
