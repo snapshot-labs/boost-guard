@@ -54,6 +54,7 @@ type Any = u8;
 struct VotesQuery;
 
 // todo: docs
+// todo: check that proposal has ended
 pub async fn create_voucher_handler(
     Extension(state): Extension<State>,
     Json(p): Json<Value>,
@@ -93,6 +94,7 @@ pub async fn create_voucher_handler(
 
 // TODO: unify get_rewards_handle and create_voucher_handler
 
+// todo: check that proposal has ended
 pub async fn get_rewards_handler(
     Extension(state): Extension<State>,
     Json(p): Json<Value>,
