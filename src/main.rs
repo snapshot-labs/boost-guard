@@ -8,7 +8,7 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
+    let addr = SocketAddr::from(([127, 0, 0, 1], 80));
     let listener = TcpListener::bind(addr).await.unwrap();
 
     axum::serve(listener, app()).await.unwrap();
