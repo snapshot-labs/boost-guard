@@ -1,6 +1,6 @@
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Extension, Router};
-use boost_guard::routes::{create_voucher_handler, get_rewards_handler};
+use boost_guard::routes::{create_voucher_handler, get_rewards_handler, health_handler};
 use std::env;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -8,7 +8,7 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+    let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
     let listener = TcpListener::bind(addr).await.unwrap();
 
     axum::serve(listener, app()).await.unwrap();
@@ -24,6 +24,7 @@ fn app() -> Router {
     Router::new()
         .route("/create-voucher", post(create_voucher_handler))
         .route("/get-rewards", post(get_rewards_handler))
+        .route("/health", get(health_handler))
         .layer(Extension(state))
 }
 
@@ -114,5 +115,21 @@ mod tests {
             .unwrap();
 
         assert!(response.status() == http::StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn test_health_check() {
+        let app = super::app();
+        let response = app
+            .oneshot(
+                http::Request::builder()
+                    .method(http::Method::GET)
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(response.status() == http::StatusCode::OK);
     }
 }

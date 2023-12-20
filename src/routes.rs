@@ -273,4 +273,8 @@ async fn get_proposal_info(
     Proposal::try_from(proposal_query)
 }
 
+pub async fn health_handler() -> Result<impl IntoResponse, ServerError> {
+    Ok(axum::response::Html("Healthy!"))
+}
+
 // TODO: add signature testing
