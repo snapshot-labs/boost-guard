@@ -20,7 +20,7 @@ pub struct ClaimConfig {
 
 const BOOST_NAME: &str = "boost";
 const BOOST_VERSION: &str = "1";
-const VERIFYING_CONTRACT: &str = "0x0000000000000000000000000000000000000000"; // singleton deployment ?
+const VERIFYING_CONTRACT: &str = "0xe370E89f87fA67e3c18d8F34c40EA962b8feDB5D"; // singleton deployment ?
 
 impl ClaimConfig {
     pub fn new(
@@ -37,7 +37,7 @@ impl ClaimConfig {
             ref_: Bytes::from_hex(
                 "0x0000000000000000000000000000000000000000000000000000000000000000",
             )
-            .unwrap(), // unwrap
+            .unwrap(),
         })
     }
 
