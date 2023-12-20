@@ -1,6 +1,6 @@
 use axum::routing::{get, post};
 use axum::{Extension, Router};
-use boost_guard::routes::{create_voucher_handler, get_rewards_handler, health_handler};
+use boost_guard::routes::{create_voucher_handler, get_rewards_handler, health_handler, forward_handler};
 use std::env;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -27,9 +27,10 @@ fn app() -> Router {
     let state = boost_guard::State { client, wallet };
 
     Router::new()
-        .route("/create-voucher", post(create_voucher_handler))
+        .route("/create-voucher", post(create_voucher_handler)) // todo: create-voucherS
         .route("/get-rewards", post(get_rewards_handler))
         .route("/health", get(health_handler))
+        .route("/forward", post(forward_handler))
         .layer(Extension(state))
 }
 
@@ -37,7 +38,7 @@ fn app() -> Router {
 mod tests {
     use axum::body::Body;
     use axum::http;
-    use boost_guard::routes::{CreateVoucherResponse, GetRewardsResponse, QueryParams};
+    use boost_guard::routes::{CreateVoucherResponse, GetRewardsResponse, QueryParams, ForwardParams};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
@@ -120,6 +121,8 @@ mod tests {
             .unwrap();
 
         assert!(response.status() == http::StatusCode::INTERNAL_SERVER_ERROR);
+        let s = response.into_body().collect().await.unwrap().to_bytes();
+        println!("{s:?}");
     }
 
     #[tokio::test]
@@ -137,4 +140,27 @@ mod tests {
             .unwrap();
         assert!(response.status() == http::StatusCode::OK);
     }
+
+    #[tokio::test]
+    async fn test_forwarder() {
+        let app = super::app();
+        let query = ForwardParams {
+            to: "https://sh5.co/".to_string(),
+        };
+
+        let response = app
+            .oneshot(
+                http::Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/forward")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(Body::from(serde_json::to_vec(&query).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        println!("{:?}", response.into_body().collect().await.unwrap().to_bytes());
+    }
+
 }
