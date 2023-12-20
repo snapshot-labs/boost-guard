@@ -15,7 +15,7 @@ RUN cargo build --release --bin boost-guard
 
 # We do not need the Rust toolchain to run the binary!
 FROM debian:bookworm-slim AS runtime
-RUN apt-get update && apt-get install libssl-dev libssl3
+RUN apt-get update && apt-get install ca-certificates libssl-dev libssl3
 WORKDIR /app
 COPY --from=builder /app/target/release/boost-guard /usr/local/bin
 # todo: remove
