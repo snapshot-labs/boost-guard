@@ -37,7 +37,7 @@ fn app() -> Router {
 mod tests {
     use axum::body::Body;
     use axum::http;
-    use boost_guard::routes::{CreateVoucherResponse, GetRewardsResponse, QueryParams};
+    use boost_guard::routes::{CreateVouchersResponse, GetRewardsResponse, QueryParams};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
@@ -63,7 +63,7 @@ mod tests {
             .await
             .unwrap();
 
-        let _response: Vec<CreateVoucherResponse> =
+        let _response: Vec<CreateVouchersResponse> =
             serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
                 .unwrap();
         println!("{:?}", _response);

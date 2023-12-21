@@ -12,9 +12,10 @@ use std::time::SystemTime;
 // TODO: check with BIG voting power (f64 precision?)
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct CreateVoucherResponse {
+pub struct CreateVouchersResponse {
     // TODO: should we include ID of request?
     pub signature: String,
+    pub reward: String,
     pub chain_id: String,
     pub boost_id: String,
 }
@@ -82,8 +83,9 @@ pub async fn create_vouchers_handler(
 
         let signature = ClaimConfig::new(&boost_id, &chain_id, &request.voter_address, reward)?
             .create_signature(&state.wallet)?; // TODO: decide if we should error the whole request or only this specific boost?
-        response.push(CreateVoucherResponse {
+        response.push(CreateVouchersResponse {
             signature: format!("0x{}", signature),
+            reward: reward.to_string(),
             chain_id,
             boost_id,
         });
