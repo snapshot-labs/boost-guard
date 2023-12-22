@@ -1,9 +1,8 @@
 use crate::ServerError;
 use ethers::signers::LocalWallet;
 use ethers::types::transaction::eip712::TypedData;
+use ethers::types::Signature;
 use ethers::types::{transaction::eip712::Eip712, Address, U256};
-use ethers::types::{Bytes, Signature};
-use ethers::utils::hex::FromHex;
 
 #[derive(Debug, Clone)]
 pub struct ClaimConfig {
@@ -14,8 +13,6 @@ pub struct ClaimConfig {
     recipient: Address, // address
     // The amount of boost token in the claim
     amount: U256, // uint256
-    // A reference string for the claim
-    ref_: Bytes,
 }
 
 const BOOST_NAME: &str = "boost";
@@ -34,10 +31,6 @@ impl ClaimConfig {
             chain_id: U256::from_str_radix(chain_id, 16)?,
             recipient: recipient.parse()?,
             amount: U256::from(amount),
-            ref_: Bytes::from_hex(
-                "0x0000000000000000000000000000000000000000000000000000000000000000",
-            )
-            .unwrap(),
         })
     }
 
@@ -74,10 +67,6 @@ impl ClaimConfig {
               {
                   "name": "amount",
                   "type": "uint256"
-              },
-              {
-                  "name": "ref",
-                  "type": "bytes32"
               }
             ]
           },
@@ -92,7 +81,6 @@ impl ClaimConfig {
             "boostId": format!("{}", self.boost_id),
             "recipient": format!("{:?}", self.recipient),
             "amount": format!("{}", self.amount),
-            "ref": format!("{}", self.ref_),
           }
         });
         let typed_data: TypedData = serde_json::from_value(json).expect("invalid json");
