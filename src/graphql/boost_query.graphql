@@ -1,0 +1,21 @@
+query BoostQuery($id: String!) {
+  boost(
+    id: $id
+  ) {
+    guard
+    strategy {
+      name
+      params {
+        version
+        proposal
+        eligibility {
+            type
+            choice
+        }
+        distribution {
+            type
+        }
+      }
+    } 
+  }
+}

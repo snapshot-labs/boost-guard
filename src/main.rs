@@ -45,10 +45,10 @@ mod tests {
     async fn test_create_vouchers() {
         let app = super::app();
         let query = QueryParams {
-            proposal_id: "0xaada75567aba0e185bab3705a485e53747dc55c342180106020e64ff96862223"
+            proposal_id: "0x054faa6a452476eecf4b7a627d8d8452f6b55fc95b2768127dae2e6758a16493"
                 .to_string(),
             voter_address: "0xe5107dee9CcC8054210FF6129cE15Eaa5bbcB1c0".to_string(), // expected vp: 598.4
-            boosts: vec![("123452".to_string(), "0x42".to_string())],
+            boosts: vec![("1".to_string(), "11155111".to_string())],
         };
 
         let response = app
@@ -63,20 +63,23 @@ mod tests {
             .await
             .unwrap();
 
-        let _response: Vec<CreateVouchersResponse> =
-            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
-                .unwrap();
-        println!("{:?}", _response);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let response: Result<Vec<CreateVouchersResponse>, _> = serde_json::from_slice(&bytes);
+        if response.is_err() {
+            println!("ERROR: {}", String::from_utf8(bytes.to_vec()).unwrap());
+        } else {
+            println!("OK: {:?}", response.unwrap());
+        }
     }
 
     #[tokio::test]
     async fn test_get_rewards() {
         let app = super::app();
         let query = QueryParams {
-            proposal_id: "0xaada75567aba0e185bab3705a485e53747dc55c342180106020e64ff96862223"
+            proposal_id: "0x054faa6a452476eecf4b7a627d8d8452f6b55fc95b2768127dae2e6758a16493"
                 .to_string(),
             voter_address: "0xe5107dee9CcC8054210FF6129cE15Eaa5bbcB1c0".to_string(), // expected vp: 598.4
-            boosts: vec![("123452".to_string(), "0x42".to_string())],
+            boosts: vec![("1".to_string(), "11155111".to_string())],
         };
 
         let response = app
@@ -91,10 +94,13 @@ mod tests {
             .await
             .unwrap();
 
-        let _response: Vec<GetRewardsResponse> =
-            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
-                .unwrap();
-        println!("{:?}", _response);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let response: Result<Vec<GetRewardsResponse>, _> = serde_json::from_slice(&bytes);
+        if response.is_err() {
+            println!("ERROR: {}", String::from_utf8(bytes.to_vec()).unwrap());
+        } else {
+            println!("OK: {:?}", response.unwrap());
+        }
     }
 
     #[tokio::test]

@@ -1,9 +1,10 @@
 use crate::signatures::ClaimConfig;
 use crate::State;
-use crate::{ServerError, HUB_URL};
+use crate::{ServerError, HUB_URL, SUBGRAPH_URL};
 use ::axum::extract::Json;
 use axum::response::IntoResponse;
 use axum::Extension;
+use ethers::types::Address;
 use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -35,9 +36,18 @@ pub struct QueryParams {
     pub boosts: Vec<(String, String)>, // Vec<(boost_id, chain_id)>
 }
 
+type Bytes = Address;
 #[derive(GraphQLQuery)]
 #[graphql(
-    schema_path = "src/graphql/schema.graphql",
+    schema_path = "src/graphql/subgraph_schema.json",
+    query_path = "src/graphql/boost_query.graphql",
+    response_derives = "Debug"
+)]
+struct BoostQuery;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "src/graphql/hub_schema.graphql",
     query_path = "src/graphql/proposal_query.graphql",
     response_derives = "Debug"
 )]
@@ -48,11 +58,102 @@ type Any = u8;
 
 #[derive(GraphQLQuery)]
 #[graphql(
-    schema_path = "src/graphql/schema.graphql",
+    schema_path = "src/graphql/hub_schema.graphql",
     query_path = "src/graphql/vote_query.graphql",
     response_derives = "Debug"
 )]
 struct VotesQuery;
+
+#[derive(Debug)]
+enum BoostStrategy {
+    Proposal,
+}
+
+impl TryFrom<&str> for BoostStrategy {
+    type Error = &'static str;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "proposal" => Ok(BoostStrategy::Proposal),
+            _ => Err("rip bozo invalid strategy"),
+        }
+    }
+}
+
+#[allow(dead_code)] // rip
+#[derive(Debug)]
+pub struct BoostInfo {
+    strategy: BoostStrategy,
+    params: BoostParams,
+}
+
+// TODO: revamp this, make it cleaner
+impl TryFrom<(&str, boost_query::BoostQueryBoostStrategyParams)> for BoostInfo {
+    type Error = &'static str;
+
+    fn try_from(
+        value: (&str, boost_query::BoostQueryBoostStrategyParams),
+    ) -> Result<Self, Self::Error> {
+        let (name, params) = value;
+        let strategy_type = BoostStrategy::try_from(name).unwrap();
+
+        match strategy_type {
+            BoostStrategy::Proposal => {
+                let eligibility = match params.eligibility.type_.as_str() {
+                    "incentive" => BoostsEligibility::Incentive,
+                    "bribe" => {
+                        let choice = params
+                            .eligibility
+                            .choice
+                            .ok_or("missing choice")?
+                            .try_into()
+                            .unwrap(); // todo remove unwrap
+                        BoostsEligibility::Bribe(choice)
+                    }
+                    _ => unreachable!("invalid eligibility"),
+                };
+
+                let distribution = match params.distribution.type_.as_str() {
+                    "weighted" => DistributionType::Weighted(None),
+                    "even" => DistributionType::Even,
+                    _ => unreachable!("invalid distribution"),
+                };
+
+                let bp = BoostParams {
+                    version: params.version,
+                    proposal: params.proposal,
+                    eligibility,
+                    distribution,
+                };
+                Ok(Self {
+                    strategy: strategy_type,
+                    params: bp,
+                })
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+// TODO: make enum dependent on BoostStrategy? Or something even more clean. maybe generics?
+pub struct BoostParams {
+    pub version: String,
+    pub proposal: String,
+    pub eligibility: BoostsEligibility,
+    pub distribution: DistributionType,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum BoostsEligibility {
+    Incentive, // Everyone who votes is eligible, regardless of choice
+    Bribe(u8), // Only those who voted for the specific choice are eligible
+}
+
+#[derive(Debug)]
+pub enum DistributionType {
+    Weighted(Option<u128>),
+    Even,
+}
 
 // todo: docs
 // todo: check that proposal has ended
@@ -70,16 +171,24 @@ pub async fn create_vouchers_handler(
 
     let mut response = Vec::with_capacity(request.boosts.len());
     for (boost_id, chain_id) in request.boosts {
-        let cap = None; // TODO: get this from ... somewhere?
-        let boosted_choice = BoostStrategy::Incentive; // TODO: get this from ... somewhere?
+        let boost_info = get_boost_info(&state.client, &boost_id).await?;
         let pool: u128 = 100; // TODO: get this from... somewhere?
         let decimals: i32 = 18; // TODO: get this from... somewhere?
 
-        validate_choice(vote.choice, boosted_choice)?;
+        if boost_info.params.proposal != request.proposal_id {
+            return Err(ServerError::ErrorString("proposal id mismatch".to_owned()));
+        }
+
+        validate_choice(vote.choice, boost_info.params.eligibility)?;
         // TODO: check cap
 
         let voting_power = vote.voting_power * 10f64.powi(decimals);
-        let reward = compute_user_reward(pool, voting_power as u128, proposal.score, cap);
+        let reward = compute_user_reward(
+            pool,
+            voting_power as u128,
+            proposal.score,
+            boost_info.params.distribution,
+        );
 
         let signature = ClaimConfig::new(&boost_id, &chain_id, &request.voter_address, reward)?
             .create_signature(&state.wallet)?; // TODO: decide if we should error the whole request or only this specific boost?
@@ -111,16 +220,23 @@ pub async fn get_rewards_handler(
 
     let mut response = Vec::with_capacity(request.boosts.len());
     for (boost_id, chain_id) in request.boosts {
-        let cap = None; // TODO: get this from ... somewhere?
-        let boosted_choice = BoostStrategy::Incentive; // TODO: get this from ... somewhere?
+        let boost_info = get_boost_info(&state.client, &boost_id).await?;
         let pool: u128 = 100; // TODO: get this from... somewhere?
         let decimals: i32 = 18; // TODO: get this from... somewhere?
 
-        validate_choice(vote.choice, boosted_choice)?;
+        if boost_info.params.proposal != request.proposal_id {
+            return Err(ServerError::ErrorString("proposal id mismatch".to_owned()));
+        }
+        validate_choice(vote.choice, boost_info.params.eligibility)?;
         // TODO: check cap
 
         let voting_power = vote.voting_power * 10f64.powi(decimals);
-        let reward = compute_user_reward(pool, voting_power as u128, proposal.score, cap);
+        let reward = compute_user_reward(
+            pool,
+            voting_power as u128,
+            proposal.score,
+            boost_info.params.distribution,
+        );
 
         response.push(GetRewardsResponse {
             reward: reward.to_string(),
@@ -136,14 +252,18 @@ fn compute_user_reward(
     pool: u128,
     voting_power: u128,
     proposal_score: u128,
-    cap: Option<f64>,
+    cap: DistributionType,
 ) -> u128 {
-    let reward = voting_power * pool / proposal_score;
-
-    if let Some(_cap) = cap {
-        todo!("implement cap");
-    } else {
-        reward
+    match cap {
+        DistributionType::Even => todo!(),
+        DistributionType::Weighted(limit) => {
+            let reward = voting_power * pool / proposal_score;
+            if let Some(_limit) = limit {
+                todo!("implement cap");
+            } else {
+                reward
+            }
+        }
     }
 }
 
@@ -171,16 +291,10 @@ fn validate_type(type_: &str) -> Result<(), ServerError> {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum BoostStrategy {
-    Incentive, // Everyone who votes is eligible, regardless of choice
-    Bribe(u8), // Only those who voted for the specific choice are eligible
-}
-
-fn validate_choice(choice: u8, boost_strategy: BoostStrategy) -> Result<(), ServerError> {
-    match boost_strategy {
-        BoostStrategy::Incentive => Ok(()),
-        BoostStrategy::Bribe(boosted_choice) => {
+fn validate_choice(choice: u8, boost_eligibility: BoostsEligibility) -> Result<(), ServerError> {
+    match boost_eligibility {
+        BoostsEligibility::Incentive => Ok(()),
+        BoostsEligibility::Bribe(boosted_choice) => {
             if choice != boosted_choice {
                 Err(ServerError::ErrorString(
                     "voter is not eligible: choice is not boosted".to_string(),
@@ -216,12 +330,12 @@ async fn get_vote_info(
         .data
         .ok_or("missing data from the hub")?
         .votes
-        .ok_or("missing votes fomr the hub")?;
+        .ok_or("missing votes from the hub")?;
 
     let vote = votes
         .into_iter()
         .next()
-        .ok_or("missing vote from the hub")?
+        .ok_or("voter has not voted for this proposal")?
         .ok_or("missing first vote from the hub?")?;
 
     Ok(Vote {
@@ -273,6 +387,28 @@ async fn get_proposal_info(
         .proposal
         .ok_or("missing proposal data from the hub")?;
     Proposal::try_from(proposal_query)
+}
+
+async fn get_boost_info(
+    client: &reqwest::Client,
+    boost_id: &str,
+) -> Result<BoostInfo, ServerError> {
+    let variables = boost_query::Variables {
+        id: boost_id.to_owned(),
+    };
+
+    let request_body = BoostQuery::build_query(variables);
+
+    let res = client.post(SUBGRAPH_URL).json(&request_body).send().await?;
+    let response_body: GraphQLResponse<boost_query::ResponseData> = res.json().await?;
+    let boost_query = response_body.data.ok_or("missing data from the hub")?;
+
+    let boost = boost_query.boost.ok_or("missing boost from the hub")?;
+    let strategy: boost_query::BoostQueryBoostStrategy = boost.strategy;
+    Ok(BoostInfo::try_from((
+        strategy.name.as_str(),
+        strategy.params,
+    ))?)
 }
 
 pub async fn health_handler() -> Result<impl IntoResponse, ServerError> {
