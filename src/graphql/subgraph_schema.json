@@ -2182,7 +2182,7 @@
               "deprecationReason": null,
               "description": null,
               "isDeprecated": false,
-              "name": "is_burnt",
+              "name": "isBurnt",
               "type": {
                 "kind": "NON_NULL",
                 "name": null,
@@ -2230,13 +2230,13 @@
               "deprecationReason": null,
               "description": null,
               "isDeprecated": false,
-              "name": "balance",
+              "name": "poolSize",
               "type": {
                 "kind": "NON_NULL",
                 "name": null,
                 "ofType": {
                   "kind": "SCALAR",
-                  "name": "BigInt",
+                  "name": "String",
                   "ofType": null
                 }
               }
@@ -3006,7 +3006,7 @@
             {
               "defaultValue": null,
               "description": null,
-              "name": "is_burnt",
+              "name": "isBurnt",
               "type": {
                 "kind": "SCALAR",
                 "name": "Boolean",
@@ -3016,7 +3016,7 @@
             {
               "defaultValue": null,
               "description": null,
-              "name": "is_burnt_not",
+              "name": "isBurnt_not",
               "type": {
                 "kind": "SCALAR",
                 "name": "Boolean",
@@ -3026,7 +3026,7 @@
             {
               "defaultValue": null,
               "description": null,
-              "name": "is_burnt_in",
+              "name": "isBurnt_in",
               "type": {
                 "kind": "LIST",
                 "name": null,
@@ -3044,7 +3044,7 @@
             {
               "defaultValue": null,
               "description": null,
-              "name": "is_burnt_not_in",
+              "name": "isBurnt_not_in",
               "type": {
                 "kind": "LIST",
                 "name": null,
@@ -3504,67 +3504,67 @@
             {
               "defaultValue": null,
               "description": null,
-              "name": "balance",
+              "name": "poolSize",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
             {
               "defaultValue": null,
               "description": null,
-              "name": "balance_not",
+              "name": "poolSize_not",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
             {
               "defaultValue": null,
               "description": null,
-              "name": "balance_gt",
+              "name": "poolSize_gt",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
             {
               "defaultValue": null,
               "description": null,
-              "name": "balance_lt",
+              "name": "poolSize_lt",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
             {
               "defaultValue": null,
               "description": null,
-              "name": "balance_gte",
+              "name": "poolSize_gte",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
             {
               "defaultValue": null,
               "description": null,
-              "name": "balance_lte",
+              "name": "poolSize_lte",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
             {
               "defaultValue": null,
               "description": null,
-              "name": "balance_in",
+              "name": "poolSize_in",
               "type": {
                 "kind": "LIST",
                 "name": null,
@@ -3573,7 +3573,7 @@
                   "name": null,
                   "ofType": {
                     "kind": "SCALAR",
-                    "name": "BigInt",
+                    "name": "String",
                     "ofType": null
                   }
                 }
@@ -3582,7 +3582,7 @@
             {
               "defaultValue": null,
               "description": null,
-              "name": "balance_not_in",
+              "name": "poolSize_not_in",
               "type": {
                 "kind": "LIST",
                 "name": null,
@@ -3591,10 +3591,130 @@
                   "name": null,
                   "ofType": {
                     "kind": "SCALAR",
-                    "name": "BigInt",
+                    "name": "String",
                     "ofType": null
                   }
                 }
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "poolSize_contains",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "poolSize_contains_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "poolSize_not_contains",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "poolSize_not_contains_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "poolSize_starts_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "poolSize_starts_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "poolSize_not_starts_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "poolSize_not_starts_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "poolSize_ends_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "poolSize_ends_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "poolSize_not_ends_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "poolSize_not_ends_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
               }
             },
             {
@@ -4336,7 +4456,7 @@
               "deprecationReason": null,
               "description": null,
               "isDeprecated": false,
-              "name": "is_burnt"
+              "name": "isBurnt"
             },
             {
               "deprecationReason": null,
@@ -4378,7 +4498,7 @@
               "deprecationReason": null,
               "description": null,
               "isDeprecated": false,
-              "name": "balance"
+              "name": "poolSize"
             },
             {
               "deprecationReason": null,
@@ -6324,7 +6444,7 @@
               "deprecationReason": null,
               "description": null,
               "isDeprecated": false,
-              "name": "boost__is_burnt"
+              "name": "boost__isBurnt"
             },
             {
               "deprecationReason": null,
@@ -6336,7 +6456,7 @@
               "deprecationReason": null,
               "description": null,
               "isDeprecated": false,
-              "name": "boost__balance"
+              "name": "boost__poolSize"
             },
             {
               "deprecationReason": null,
@@ -6463,7 +6583,7 @@
                 "name": null,
                 "ofType": {
                   "kind": "SCALAR",
-                  "name": "BigInt",
+                  "name": "String",
                   "ofType": null
                 }
               }
@@ -7092,7 +7212,7 @@
               "name": "amount",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
@@ -7102,7 +7222,7 @@
               "name": "amount_not",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
@@ -7112,7 +7232,7 @@
               "name": "amount_gt",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
@@ -7122,7 +7242,7 @@
               "name": "amount_lt",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
@@ -7132,7 +7252,7 @@
               "name": "amount_gte",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
@@ -7142,7 +7262,7 @@
               "name": "amount_lte",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
@@ -7158,7 +7278,7 @@
                   "name": null,
                   "ofType": {
                     "kind": "SCALAR",
-                    "name": "BigInt",
+                    "name": "String",
                     "ofType": null
                   }
                 }
@@ -7176,10 +7296,130 @@
                   "name": null,
                   "ofType": {
                     "kind": "SCALAR",
-                    "name": "BigInt",
+                    "name": "String",
                     "ofType": null
                   }
                 }
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "amount_contains",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "amount_contains_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "amount_not_contains",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "amount_not_contains_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "amount_starts_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "amount_starts_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "amount_not_starts_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "amount_not_starts_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "amount_ends_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "amount_ends_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "amount_not_ends_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "amount_not_ends_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
               }
             },
             {
@@ -7571,7 +7811,7 @@
               "deprecationReason": null,
               "description": null,
               "isDeprecated": false,
-              "name": "boost__is_burnt"
+              "name": "boost__isBurnt"
             },
             {
               "deprecationReason": null,
@@ -7583,7 +7823,7 @@
               "deprecationReason": null,
               "description": null,
               "isDeprecated": false,
-              "name": "boost__balance"
+              "name": "boost__poolSize"
             },
             {
               "deprecationReason": null,
@@ -11014,6 +11254,108 @@
                 "name": null,
                 "ofType": {
                   "kind": "SCALAR",
+                  "name": "String",
+                  "ofType": null
+                }
+              }
+            },
+            {
+              "args": [
+                {
+                  "defaultValue": "0",
+                  "description": null,
+                  "name": "skip",
+                  "type": {
+                    "kind": "SCALAR",
+                    "name": "Int",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": "100",
+                  "description": null,
+                  "name": "first",
+                  "type": {
+                    "kind": "SCALAR",
+                    "name": "Int",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": null,
+                  "description": null,
+                  "name": "orderBy",
+                  "type": {
+                    "kind": "ENUM",
+                    "name": "Boost_orderBy",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": null,
+                  "description": null,
+                  "name": "orderDirection",
+                  "type": {
+                    "kind": "ENUM",
+                    "name": "OrderDirection",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": null,
+                  "description": null,
+                  "name": "where",
+                  "type": {
+                    "kind": "INPUT_OBJECT",
+                    "name": "Boost_filter",
+                    "ofType": null
+                  }
+                }
+              ],
+              "deprecationReason": null,
+              "description": null,
+              "isDeprecated": false,
+              "name": "boosts",
+              "type": {
+                "kind": "NON_NULL",
+                "name": null,
+                "ofType": {
+                  "kind": "LIST",
+                  "name": null,
+                  "ofType": {
+                    "kind": "NON_NULL",
+                    "name": null,
+                    "ofType": {
+                      "kind": "OBJECT",
+                      "name": "Boost",
+                      "ofType": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "inputFields": null,
+          "interfaces": [],
+          "kind": "OBJECT",
+          "name": "Proposal",
+          "possibleTypes": null
+        },
+        {
+          "description": null,
+          "enumValues": null,
+          "fields": [
+            {
+              "args": [],
+              "deprecationReason": null,
+              "description": null,
+              "isDeprecated": false,
+              "name": "id",
+              "type": {
+                "kind": "NON_NULL",
+                "name": null,
+                "ofType": {
+                  "kind": "SCALAR",
                   "name": "Bytes",
                   "ofType": null
                 }
@@ -12926,6 +13268,412 @@
         {
           "description": null,
           "enumValues": null,
+          "fields": null,
+          "inputFields": [
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_not",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_gt",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_lt",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_gte",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_lte",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_in",
+              "type": {
+                "kind": "LIST",
+                "name": null,
+                "ofType": {
+                  "kind": "NON_NULL",
+                  "name": null,
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "String",
+                    "ofType": null
+                  }
+                }
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_not_in",
+              "type": {
+                "kind": "LIST",
+                "name": null,
+                "ofType": {
+                  "kind": "NON_NULL",
+                  "name": null,
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "String",
+                    "ofType": null
+                  }
+                }
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_contains",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_contains_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_not_contains",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_not_contains_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_starts_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_starts_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_not_starts_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_not_starts_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_ends_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_ends_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_not_ends_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "id_not_ends_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "boosts",
+              "type": {
+                "kind": "LIST",
+                "name": null,
+                "ofType": {
+                  "kind": "NON_NULL",
+                  "name": null,
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "String",
+                    "ofType": null
+                  }
+                }
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "boosts_not",
+              "type": {
+                "kind": "LIST",
+                "name": null,
+                "ofType": {
+                  "kind": "NON_NULL",
+                  "name": null,
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "String",
+                    "ofType": null
+                  }
+                }
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "boosts_contains",
+              "type": {
+                "kind": "LIST",
+                "name": null,
+                "ofType": {
+                  "kind": "NON_NULL",
+                  "name": null,
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "String",
+                    "ofType": null
+                  }
+                }
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "boosts_contains_nocase",
+              "type": {
+                "kind": "LIST",
+                "name": null,
+                "ofType": {
+                  "kind": "NON_NULL",
+                  "name": null,
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "String",
+                    "ofType": null
+                  }
+                }
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "boosts_not_contains",
+              "type": {
+                "kind": "LIST",
+                "name": null,
+                "ofType": {
+                  "kind": "NON_NULL",
+                  "name": null,
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "String",
+                    "ofType": null
+                  }
+                }
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "boosts_not_contains_nocase",
+              "type": {
+                "kind": "LIST",
+                "name": null,
+                "ofType": {
+                  "kind": "NON_NULL",
+                  "name": null,
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "String",
+                    "ofType": null
+                  }
+                }
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "boosts_",
+              "type": {
+                "kind": "INPUT_OBJECT",
+                "name": "Boost_filter",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": "Filter for the block changed event.",
+              "name": "_change_block",
+              "type": {
+                "kind": "INPUT_OBJECT",
+                "name": "BlockChangedFilter",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "and",
+              "type": {
+                "kind": "LIST",
+                "name": null,
+                "ofType": {
+                  "kind": "INPUT_OBJECT",
+                  "name": "Proposal_filter",
+                  "ofType": null
+                }
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "or",
+              "type": {
+                "kind": "LIST",
+                "name": null,
+                "ofType": {
+                  "kind": "INPUT_OBJECT",
+                  "name": "Proposal_filter",
+                  "ofType": null
+                }
+              }
+            }
+          ],
+          "interfaces": null,
+          "kind": "INPUT_OBJECT",
+          "name": "Proposal_filter",
+          "possibleTypes": null
+        },
+        {
+          "description": null,
+          "enumValues": [
+            {
+              "deprecationReason": null,
+              "description": null,
+              "isDeprecated": false,
+              "name": "id"
+            },
+            {
+              "deprecationReason": null,
+              "description": null,
+              "isDeprecated": false,
+              "name": "boosts"
+            }
+          ],
+          "fields": null,
+          "inputFields": null,
+          "interfaces": null,
+          "kind": "ENUM",
+          "name": "Proposal_orderBy",
+          "possibleTypes": null
+        },
+        {
+          "description": null,
+          "enumValues": null,
           "fields": [
             {
               "args": [
@@ -14121,6 +14869,156 @@
                     "ofType": {
                       "kind": "OBJECT",
                       "name": "Burn",
+                      "ofType": null
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "args": [
+                {
+                  "defaultValue": null,
+                  "description": null,
+                  "name": "id",
+                  "type": {
+                    "kind": "NON_NULL",
+                    "name": null,
+                    "ofType": {
+                      "kind": "SCALAR",
+                      "name": "ID",
+                      "ofType": null
+                    }
+                  }
+                },
+                {
+                  "defaultValue": null,
+                  "description": "The block at which the query should be executed. Can either be a `{ hash: Bytes }` value containing a block hash, a `{ number: Int }` containing the block number, or a `{ number_gte: Int }` containing the minimum block number. In the case of `number_gte`, the query will be executed on the latest block only if the subgraph has progressed to or past the minimum block number. Defaults to the latest block when omitted.",
+                  "name": "block",
+                  "type": {
+                    "kind": "INPUT_OBJECT",
+                    "name": "Block_height",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": "deny",
+                  "description": "Set to `allow` to receive data even if the subgraph has skipped over errors while syncing.",
+                  "name": "subgraphError",
+                  "type": {
+                    "kind": "NON_NULL",
+                    "name": null,
+                    "ofType": {
+                      "kind": "ENUM",
+                      "name": "_SubgraphErrorPolicy_",
+                      "ofType": null
+                    }
+                  }
+                }
+              ],
+              "deprecationReason": null,
+              "description": null,
+              "isDeprecated": false,
+              "name": "proposal",
+              "type": {
+                "kind": "OBJECT",
+                "name": "Proposal",
+                "ofType": null
+              }
+            },
+            {
+              "args": [
+                {
+                  "defaultValue": "0",
+                  "description": null,
+                  "name": "skip",
+                  "type": {
+                    "kind": "SCALAR",
+                    "name": "Int",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": "100",
+                  "description": null,
+                  "name": "first",
+                  "type": {
+                    "kind": "SCALAR",
+                    "name": "Int",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": null,
+                  "description": null,
+                  "name": "orderBy",
+                  "type": {
+                    "kind": "ENUM",
+                    "name": "Proposal_orderBy",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": null,
+                  "description": null,
+                  "name": "orderDirection",
+                  "type": {
+                    "kind": "ENUM",
+                    "name": "OrderDirection",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": null,
+                  "description": null,
+                  "name": "where",
+                  "type": {
+                    "kind": "INPUT_OBJECT",
+                    "name": "Proposal_filter",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": null,
+                  "description": "The block at which the query should be executed. Can either be a `{ hash: Bytes }` value containing a block hash, a `{ number: Int }` containing the block number, or a `{ number_gte: Int }` containing the minimum block number. In the case of `number_gte`, the query will be executed on the latest block only if the subgraph has progressed to or past the minimum block number. Defaults to the latest block when omitted.",
+                  "name": "block",
+                  "type": {
+                    "kind": "INPUT_OBJECT",
+                    "name": "Block_height",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": "deny",
+                  "description": "Set to `allow` to receive data even if the subgraph has skipped over errors while syncing.",
+                  "name": "subgraphError",
+                  "type": {
+                    "kind": "NON_NULL",
+                    "name": null,
+                    "ofType": {
+                      "kind": "ENUM",
+                      "name": "_SubgraphErrorPolicy_",
+                      "ofType": null
+                    }
+                  }
+                }
+              ],
+              "deprecationReason": null,
+              "description": null,
+              "isDeprecated": false,
+              "name": "proposals",
+              "type": {
+                "kind": "NON_NULL",
+                "name": null,
+                "ofType": {
+                  "kind": "LIST",
+                  "name": null,
+                  "ofType": {
+                    "kind": "NON_NULL",
+                    "name": null,
+                    "ofType": {
+                      "kind": "OBJECT",
+                      "name": "Proposal",
                       "ofType": null
                     }
                   }
@@ -16765,6 +17663,156 @@
               "deprecationReason": null,
               "description": null,
               "isDeprecated": false,
+              "name": "proposal",
+              "type": {
+                "kind": "OBJECT",
+                "name": "Proposal",
+                "ofType": null
+              }
+            },
+            {
+              "args": [
+                {
+                  "defaultValue": "0",
+                  "description": null,
+                  "name": "skip",
+                  "type": {
+                    "kind": "SCALAR",
+                    "name": "Int",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": "100",
+                  "description": null,
+                  "name": "first",
+                  "type": {
+                    "kind": "SCALAR",
+                    "name": "Int",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": null,
+                  "description": null,
+                  "name": "orderBy",
+                  "type": {
+                    "kind": "ENUM",
+                    "name": "Proposal_orderBy",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": null,
+                  "description": null,
+                  "name": "orderDirection",
+                  "type": {
+                    "kind": "ENUM",
+                    "name": "OrderDirection",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": null,
+                  "description": null,
+                  "name": "where",
+                  "type": {
+                    "kind": "INPUT_OBJECT",
+                    "name": "Proposal_filter",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": null,
+                  "description": "The block at which the query should be executed. Can either be a `{ hash: Bytes }` value containing a block hash, a `{ number: Int }` containing the block number, or a `{ number_gte: Int }` containing the minimum block number. In the case of `number_gte`, the query will be executed on the latest block only if the subgraph has progressed to or past the minimum block number. Defaults to the latest block when omitted.",
+                  "name": "block",
+                  "type": {
+                    "kind": "INPUT_OBJECT",
+                    "name": "Block_height",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": "deny",
+                  "description": "Set to `allow` to receive data even if the subgraph has skipped over errors while syncing.",
+                  "name": "subgraphError",
+                  "type": {
+                    "kind": "NON_NULL",
+                    "name": null,
+                    "ofType": {
+                      "kind": "ENUM",
+                      "name": "_SubgraphErrorPolicy_",
+                      "ofType": null
+                    }
+                  }
+                }
+              ],
+              "deprecationReason": null,
+              "description": null,
+              "isDeprecated": false,
+              "name": "proposals",
+              "type": {
+                "kind": "NON_NULL",
+                "name": null,
+                "ofType": {
+                  "kind": "LIST",
+                  "name": null,
+                  "ofType": {
+                    "kind": "NON_NULL",
+                    "name": null,
+                    "ofType": {
+                      "kind": "OBJECT",
+                      "name": "Proposal",
+                      "ofType": null
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "args": [
+                {
+                  "defaultValue": null,
+                  "description": null,
+                  "name": "id",
+                  "type": {
+                    "kind": "NON_NULL",
+                    "name": null,
+                    "ofType": {
+                      "kind": "SCALAR",
+                      "name": "ID",
+                      "ofType": null
+                    }
+                  }
+                },
+                {
+                  "defaultValue": null,
+                  "description": "The block at which the query should be executed. Can either be a `{ hash: Bytes }` value containing a block hash, a `{ number: Int }` containing the block number, or a `{ number_gte: Int }` containing the minimum block number. In the case of `number_gte`, the query will be executed on the latest block only if the subgraph has progressed to or past the minimum block number. Defaults to the latest block when omitted.",
+                  "name": "block",
+                  "type": {
+                    "kind": "INPUT_OBJECT",
+                    "name": "Block_height",
+                    "ofType": null
+                  }
+                },
+                {
+                  "defaultValue": "deny",
+                  "description": "Set to `allow` to receive data even if the subgraph has skipped over errors while syncing.",
+                  "name": "subgraphError",
+                  "type": {
+                    "kind": "NON_NULL",
+                    "name": null,
+                    "ofType": {
+                      "kind": "ENUM",
+                      "name": "_SubgraphErrorPolicy_",
+                      "ofType": null
+                    }
+                  }
+                }
+              ],
+              "deprecationReason": null,
+              "description": null,
+              "isDeprecated": false,
               "name": "claim",
               "type": {
                 "kind": "OBJECT",
@@ -18164,7 +19212,7 @@
                 "name": null,
                 "ofType": {
                   "kind": "SCALAR",
-                  "name": "BigInt",
+                  "name": "String",
                   "ofType": null
                 }
               }
@@ -20395,7 +21443,7 @@
               "name": "decimals",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
@@ -20405,7 +21453,7 @@
               "name": "decimals_not",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
@@ -20415,7 +21463,7 @@
               "name": "decimals_gt",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
@@ -20425,7 +21473,7 @@
               "name": "decimals_lt",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
@@ -20435,7 +21483,7 @@
               "name": "decimals_gte",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
@@ -20445,7 +21493,7 @@
               "name": "decimals_lte",
               "type": {
                 "kind": "SCALAR",
-                "name": "BigInt",
+                "name": "String",
                 "ofType": null
               }
             },
@@ -20461,7 +21509,7 @@
                   "name": null,
                   "ofType": {
                     "kind": "SCALAR",
-                    "name": "BigInt",
+                    "name": "String",
                     "ofType": null
                   }
                 }
@@ -20479,10 +21527,130 @@
                   "name": null,
                   "ofType": {
                     "kind": "SCALAR",
-                    "name": "BigInt",
+                    "name": "String",
                     "ofType": null
                   }
                 }
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "decimals_contains",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "decimals_contains_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "decimals_not_contains",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "decimals_not_contains_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "decimals_starts_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "decimals_starts_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "decimals_not_starts_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "decimals_not_starts_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "decimals_ends_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "decimals_ends_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "decimals_not_ends_with",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
+              }
+            },
+            {
+              "defaultValue": null,
+              "description": null,
+              "name": "decimals_not_ends_with_nocase",
+              "type": {
+                "kind": "SCALAR",
+                "name": "String",
+                "ofType": null
               }
             },
             {

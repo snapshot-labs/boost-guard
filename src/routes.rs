@@ -85,16 +85,17 @@ impl TryFrom<&str> for BoostStrategy {
 pub struct BoostInfo {
     strategy: BoostStrategy,
     params: BoostParams,
+    pool_size: u128,
+    decimals: u8,
 }
 
 // TODO: revamp this, make it cleaner
-impl TryFrom<(&str, boost_query::BoostQueryBoostStrategyParams)> for BoostInfo {
+impl TryFrom<boost_query::BoostQueryBoost> for BoostInfo {
     type Error = &'static str;
 
-    fn try_from(
-        value: (&str, boost_query::BoostQueryBoostStrategyParams),
-    ) -> Result<Self, Self::Error> {
-        let (name, params) = value;
+    fn try_from(value: boost_query::BoostQueryBoost) -> Result<Self, Self::Error> {
+        let name = value.strategy.name.as_str();
+        let params = value.strategy.params;
         let strategy_type = BoostStrategy::try_from(name).unwrap();
 
         match strategy_type {
@@ -125,9 +126,19 @@ impl TryFrom<(&str, boost_query::BoostQueryBoostStrategyParams)> for BoostInfo {
                     eligibility,
                     distribution,
                 };
+
+                let pool_size = value.pool_size.parse().expect("failed to parse pool size"); // todo: error
+                let decimals = value
+                    .token
+                    .decimals
+                    .parse()
+                    .expect("failed to parse decimals"); // todo: error
+
                 Ok(Self {
                     strategy: strategy_type,
                     params: bp,
+                    pool_size,
+                    decimals,
                 })
             }
         }
@@ -172,8 +183,8 @@ pub async fn create_vouchers_handler(
     let mut response = Vec::with_capacity(request.boosts.len());
     for (boost_id, chain_id) in request.boosts {
         let boost_info = get_boost_info(&state.client, &boost_id).await?;
-        let pool: u128 = 100; // TODO: get this from... somewhere?
-        let decimals: i32 = 18; // TODO: get this from... somewhere?
+        let pool: u128 = boost_info.pool_size;
+        let decimals: u8 = boost_info.decimals;
 
         if boost_info.params.proposal != request.proposal_id {
             return Err(ServerError::ErrorString("proposal id mismatch".to_owned()));
@@ -182,11 +193,12 @@ pub async fn create_vouchers_handler(
         validate_choice(vote.choice, boost_info.params.eligibility)?;
         // TODO: check cap
 
-        let voting_power = vote.voting_power * 10f64.powi(decimals);
+        let voting_power = vote.voting_power * 10f64.powi(decimals as i32);
+        let score = proposal.score * 10f64.powi(decimals as i32);
         let reward = compute_user_reward(
             pool,
             voting_power as u128,
-            proposal.score,
+            score as u128,
             boost_info.params.distribution,
         );
 
@@ -221,8 +233,8 @@ pub async fn get_rewards_handler(
     let mut response = Vec::with_capacity(request.boosts.len());
     for (boost_id, chain_id) in request.boosts {
         let boost_info = get_boost_info(&state.client, &boost_id).await?;
-        let pool: u128 = 100; // TODO: get this from... somewhere?
-        let decimals: i32 = 18; // TODO: get this from... somewhere?
+        let pool: u128 = boost_info.pool_size;
+        let decimals = boost_info.decimals;
 
         if boost_info.params.proposal != request.proposal_id {
             return Err(ServerError::ErrorString("proposal id mismatch".to_owned()));
@@ -230,11 +242,12 @@ pub async fn get_rewards_handler(
         validate_choice(vote.choice, boost_info.params.eligibility)?;
         // TODO: check cap
 
-        let voting_power = vote.voting_power * 10f64.powi(decimals);
+        let voting_power = vote.voting_power * 10f64.powi(decimals as i32);
+        let score = proposal.score * 10f64.powi(decimals as i32);
         let reward = compute_user_reward(
             pool,
             voting_power as u128,
-            proposal.score,
+            score as u128,
             boost_info.params.distribution,
         );
 
@@ -347,7 +360,7 @@ async fn get_vote_info(
 #[derive(Debug)]
 struct Proposal {
     type_: String,
-    score: u128,
+    score: f64,
     end: u64,
 }
 
@@ -358,7 +371,7 @@ impl TryFrom<proposal_query::ProposalQueryProposal> for Proposal {
         let proposal_type = proposal.type_.ok_or("missing proposal type from the hub")?;
         let proposal_score = proposal
             .scores_total
-            .ok_or("missing proposal score from the hub")? as u128;
+            .ok_or("missing proposal score from the hub")?;
         let proposal_end = proposal.end.try_into()?;
 
         Ok(Proposal {
@@ -404,11 +417,7 @@ async fn get_boost_info(
     let boost_query = response_body.data.ok_or("missing data from the hub")?;
 
     let boost = boost_query.boost.ok_or("missing boost from the hub")?;
-    let strategy: boost_query::BoostQueryBoostStrategy = boost.strategy;
-    Ok(BoostInfo::try_from((
-        strategy.name.as_str(),
-        strategy.params,
-    ))?)
+    Ok(BoostInfo::try_from(boost)?)
 }
 
 pub async fn health_handler() -> Result<impl IntoResponse, ServerError> {

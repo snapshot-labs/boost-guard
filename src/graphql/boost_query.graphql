@@ -3,6 +3,10 @@ query BoostQuery($id: String!) {
     id: $id
   ) {
     guard
+    poolSize
+    token {
+        decimals
+    }
     strategy {
       name
       params {
