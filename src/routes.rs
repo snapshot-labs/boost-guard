@@ -179,18 +179,19 @@ pub async fn create_vouchers_handler(
 
     let mut response = Vec::with_capacity(request.boosts.len());
     for (boost_id, chain_id) in request.boosts {
-        let boost_info = get_boost_info(&state.client, &boost_id).await?;
+        let Ok(boost_info) = get_boost_info(&state.client, &boost_id).await else {
+            continue;
+        };
         let pool: u128 = boost_info.pool_size;
         let decimals: u8 = boost_info.decimals;
 
         if boost_info.params.proposal != request.proposal_id {
-            return Err(ServerError::ErrorString(format!(
-                "proposal id mismatch: ipfs: {}, request: {}",
-                boost_info.params.proposal, request.proposal_id
-            )));
+            continue;
         }
 
-        validate_choice(vote.choice, boost_info.params.eligibility)?;
+        if validate_choice(vote.choice, boost_info.params.eligibility).is_err() {
+            continue;
+        }
         // TODO: check cap
 
         let voting_power = vote.voting_power * 10f64.powi(decimals as i32);
@@ -202,8 +203,13 @@ pub async fn create_vouchers_handler(
             boost_info.params.distribution,
         );
 
-        let signature = ClaimConfig::new(&boost_id, &chain_id, &request.voter_address, reward)?
-            .create_signature(&state.wallet)?; // TODO: decide if we should error the whole request or only this specific boost?
+        let Ok(claim_cfg) = ClaimConfig::new(&boost_id, &chain_id, &request.voter_address, reward)
+        else {
+            continue;
+        };
+        let Ok(signature) = claim_cfg.create_signature(&state.wallet) else {
+            continue;
+        };
         response.push(CreateVouchersResponse {
             signature: format!("0x{}", signature),
             reward: reward.to_string(),
@@ -232,18 +238,20 @@ pub async fn get_rewards_handler(
 
     let mut response = Vec::with_capacity(request.boosts.len());
     for (boost_id, chain_id) in request.boosts {
-        let boost_info = get_boost_info(&state.client, &boost_id).await?;
+        let Ok(boost_info) = get_boost_info(&state.client, &boost_id).await else {
+            continue;
+        };
+
         let pool: u128 = boost_info.pool_size;
         let decimals = boost_info.decimals;
 
         if boost_info.params.proposal != request.proposal_id {
-            return Err(ServerError::ErrorString(format!(
-                "proposal id mismatch: ipfs: {}, request: {}",
-                boost_info.params.proposal, request.proposal_id
-            )));
+            continue;
         }
 
-        validate_choice(vote.choice, boost_info.params.eligibility)?;
+        if validate_choice(vote.choice, boost_info.params.eligibility).is_err() {
+            continue;
+        }
         // TODO: check cap
 
         let voting_power = vote.voting_power * 10f64.powi(decimals as i32);
@@ -313,9 +321,10 @@ fn validate_choice(choice: u8, boost_eligibility: BoostsEligibility) -> Result<(
         BoostsEligibility::Incentive => Ok(()),
         BoostsEligibility::Bribe(boosted_choice) => {
             if choice != boosted_choice {
-                Err(ServerError::ErrorString(
-                    "voter is not eligible: choice is not boosted".to_string(),
-                ))
+                Err(ServerError::ErrorString(format!(
+                    "voter voted {:} but needed to vote {} to be eligible",
+                    choice, boosted_choice
+                )))
             } else {
                 Ok(())
             }
@@ -406,11 +415,16 @@ async fn get_proposal_info(
         .send()
         .await?;
     let response_body: GraphQLResponse<proposal_query::ResponseData> = res.json().await?;
-    let proposal_query: proposal_query::ProposalQueryProposal = response_body
-        .data
-        .ok_or("missing data from the hub")?
-        .proposal
-        .ok_or("missing proposal data from the hub")?;
+    let tutu = response_body.data.ok_or("missing data from the hub")?;
+    println!("TUTU: {:?}", tutu);
+    let proposal_query: proposal_query::ProposalQueryProposal =
+        tutu.proposal.ok_or("missing proposal data from the hub")?;
+
+    // let proposal_query: proposal_query::ProposalQueryProposal = response_body
+    //     .data
+    //     .ok_or("missing data from the hub")?
+    //     .proposal
+    //     .ok_or("missing proposal data from the hub")?;
     Proposal::try_from(proposal_query)
 }
 

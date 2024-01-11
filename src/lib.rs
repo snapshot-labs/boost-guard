@@ -17,6 +17,12 @@ lazy_static! {
     };
     static ref SUBGRAPH_URL: String = env::var("SUBGRAPH_URL")
         .expect("Please add SUBGRAPH_URL to your environment or .env file.");
+    static ref BOOST_NAME: String =
+        env::var("BOOST_NAME").expect("Please add BOOST_NAME to your environment or .env file");
+    static ref BOOST_VERSION: String = env::var("BOOST_VERSION")
+        .expect("Please add BOOST_VERSION to your environment or .env file");
+    static ref VERIFYING_CONTRACT: String = env::var("VERIFYING_CONTRACT")
+        .expect("Please add VERIFYING_CONTRACT to your environment or .env file");
 }
 
 pub enum ServerError {

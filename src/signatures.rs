@@ -1,4 +1,4 @@
-use crate::ServerError;
+use crate::{ServerError, BOOST_NAME, BOOST_VERSION, VERIFYING_CONTRACT};
 use ethers::signers::LocalWallet;
 use ethers::types::transaction::eip712::TypedData;
 use ethers::types::Signature;
@@ -14,11 +14,6 @@ pub struct ClaimConfig {
     // The amount of boost token in the claim
     amount: U256, // uint256
 }
-
-// TODO: get from env
-const BOOST_NAME: &str = "boost";
-const BOOST_VERSION: &str = "1";
-const VERIFYING_CONTRACT: &str = "0x3a18420C0646CC8e6D46E43d792335AeCB657fd0";
 
 impl ClaimConfig {
     pub fn new(
@@ -73,10 +68,10 @@ impl ClaimConfig {
           },
           "primaryType": "Claim",
           "domain": {
-            "name": format!("{BOOST_NAME:}"),
-            "version": format!("{BOOST_VERSION:}"),
+            "name": BOOST_NAME.as_str(),
+            "version": BOOST_VERSION.as_str(),
             "chainId": format!("{:}", self.chain_id),
-            "verifyingContract": format!("{VERIFYING_CONTRACT:}"),
+            "verifyingContract": VERIFYING_CONTRACT.as_str(),
           },
           "message": {
             "boostId": format!("{}", self.boost_id),
@@ -84,6 +79,7 @@ impl ClaimConfig {
             "amount": format!("{}", self.amount),
           }
         });
+        println!("-- DEBUG: {json:?}");
         let typed_data: TypedData = serde_json::from_value(json).expect("invalid json");
         let hash = typed_data.encode_eip712().expect("failed to encode eip712");
         signer

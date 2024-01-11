@@ -50,10 +50,10 @@ mod tests {
     async fn test_create_vouchers() {
         let app = super::app();
         let query = QueryParams {
-            proposal_id: "0x054faa6a452476eecf4b7a627d8d8452f6b55fc95b2768127dae2e6758a16493"
+            proposal_id: "0x04c7512be9a0a0d8c12885a9c6cf84354749dc1e4cdd4eda64b4cb33bc126880"
                 .to_string(),
-            voter_address: "0xe5107dee9CcC8054210FF6129cE15Eaa5bbcB1c0".to_string(), // expected vp: 598.4
-            boosts: vec![("1".to_string(), "11155111".to_string())],
+            voter_address: "0xc83A9e69012312513328992d454290be85e95101".to_string(),
+            boosts: vec![("18".to_string(), "11155111".to_string())],
         };
 
         let response = app
@@ -72,6 +72,7 @@ mod tests {
         let response: Result<Vec<CreateVouchersResponse>, _> = serde_json::from_slice(&bytes);
         if response.is_err() {
             println!("ERROR: {}", String::from_utf8(bytes.to_vec()).unwrap());
+            panic!();
         } else {
             println!("OK: {:?}", response.unwrap());
         }
@@ -81,10 +82,10 @@ mod tests {
     async fn test_get_rewards() {
         let app = super::app();
         let query = QueryParams {
-            proposal_id: "0xf26fa3558f083519e9adbce4652eac882838c5cade3502703c07b33fcb51941f"
+            proposal_id: "0x6ccdb6f159fd1303d2a5d25e0eae42177d269a91c556bd76a849f88e4486ad93"
                 .to_string(),
-            voter_address: "0x3901D0fDe202aF1427216b79f5243f8A022d68cf".to_string(), // expected vp: 598.4
-            boosts: vec![("19".to_string(), "11155111".to_string())],
+            voter_address: "0xc83A9e69012312513328992d454290be85e95101".to_string(),
+            boosts: vec![("11".to_string(), "11155111".to_string())],
         };
 
         let response = app
@@ -103,6 +104,7 @@ mod tests {
         let response: Result<Vec<GetRewardsResponse>, _> = serde_json::from_slice(&bytes);
         if response.is_err() {
             println!("ERROR: {}", String::from_utf8(bytes.to_vec()).unwrap());
+            panic!();
         } else {
             println!("OK: {:?}", response.unwrap());
         }
