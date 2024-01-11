@@ -15,9 +15,10 @@ pub struct ClaimConfig {
     amount: U256, // uint256
 }
 
+// TODO: get from env
 const BOOST_NAME: &str = "boost";
 const BOOST_VERSION: &str = "1";
-const VERIFYING_CONTRACT: &str = "0xe370E89f87fA67e3c18d8F34c40EA962b8feDB5D"; // singleton deployment ?
+const VERIFYING_CONTRACT: &str = "0x3a18420C0646CC8e6D46E43d792335AeCB657fd0";
 
 impl ClaimConfig {
     pub fn new(
