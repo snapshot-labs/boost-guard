@@ -14,7 +14,6 @@ use std::time::SystemTime;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateVouchersResponse {
-    // TODO: should we include ID of request?
     pub signature: String,
     pub reward: String,
     pub chain_id: String,
@@ -23,7 +22,6 @@ pub struct CreateVouchersResponse {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GetRewardsResponse {
-    // TODO: should we include ID of request?
     pub reward: String,
     pub chain_id: String,
     pub boost_id: String,
@@ -55,7 +53,6 @@ struct ProposalQuery;
 
 // TODO: only works for basic ? idk
 type Any = u8;
-
 #[derive(GraphQLQuery)]
 #[graphql(
     schema_path = "src/graphql/hub_schema.graphql",
@@ -80,7 +77,7 @@ impl TryFrom<&str> for BoostStrategy {
     }
 }
 
-#[allow(dead_code)] // rip
+#[allow(dead_code)] // needed for strategy field
 #[derive(Debug)]
 pub struct BoostInfo {
     strategy: BoostStrategy,
@@ -187,7 +184,10 @@ pub async fn create_vouchers_handler(
         let decimals: u8 = boost_info.decimals;
 
         if boost_info.params.proposal != request.proposal_id {
-            return Err(ServerError::ErrorString("proposal id mismatch".to_owned()));
+            return Err(ServerError::ErrorString(format!(
+                "proposal id mismatch: ipfs: {}, request: {}",
+                boost_info.params.proposal, request.proposal_id
+            )));
         }
 
         validate_choice(vote.choice, boost_info.params.eligibility)?;
@@ -237,8 +237,12 @@ pub async fn get_rewards_handler(
         let decimals = boost_info.decimals;
 
         if boost_info.params.proposal != request.proposal_id {
-            return Err(ServerError::ErrorString("proposal id mismatch".to_owned()));
+            return Err(ServerError::ErrorString(format!(
+                "proposal id mismatch: ipfs: {}, request: {}",
+                boost_info.params.proposal, request.proposal_id
+            )));
         }
+
         validate_choice(vote.choice, boost_info.params.eligibility)?;
         // TODO: check cap
 
