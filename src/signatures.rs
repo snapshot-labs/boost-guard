@@ -23,8 +23,8 @@ impl ClaimConfig {
         amount: u128,
     ) -> Result<Self, ServerError> {
         Ok(Self {
-            boost_id: U256::from_str_radix(boost_id, 16)?, // todo: decide on hex or decimal
-            chain_id: U256::from_str_radix(chain_id, 16)?,
+            boost_id: U256::from_str_radix(boost_id, 10)?, // todo: decide on hex or decimal
+            chain_id: U256::from_str_radix(chain_id, 10)?,
             recipient: recipient.parse()?,
             amount: U256::from(amount),
         })
