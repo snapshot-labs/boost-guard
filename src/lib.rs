@@ -5,7 +5,7 @@ pub mod routes;
 pub mod signatures;
 
 const HUB_URL: &str = "https://testnet.hub.snapshot.org/graphql";
-const SUBGRAPH_URL: &str = "https://api.thegraph.com/subgraphs/name/pscott/boost-sepolia";
+const SUBGRAPH_URL: &str = "https://api.thegraph.com/subgraphs/name/snapshot-labs/boost-sepolia";
 
 pub enum ServerError {
     ErrorString(String),
