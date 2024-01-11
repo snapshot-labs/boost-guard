@@ -341,7 +341,11 @@ async fn get_vote_info(
 
     let request_body = VotesQuery::build_query(variables);
 
-    let res = client.post(HUB_URL).json(&request_body).send().await?;
+    let res = client
+        .post(HUB_URL.as_str())
+        .json(&request_body)
+        .send()
+        .await?;
     let response_body: GraphQLResponse<votes_query::ResponseData> = res.json().await?;
     let votes = response_body
         .data
@@ -396,7 +400,11 @@ async fn get_proposal_info(
 
     let request_body = ProposalQuery::build_query(variables);
 
-    let res = client.post(HUB_URL).json(&request_body).send().await?;
+    let res = client
+        .post(HUB_URL.as_str())
+        .json(&request_body)
+        .send()
+        .await?;
     let response_body: GraphQLResponse<proposal_query::ResponseData> = res.json().await?;
     let proposal_query: proposal_query::ProposalQueryProposal = response_body
         .data
@@ -416,7 +424,11 @@ async fn get_boost_info(
 
     let request_body = BoostQuery::build_query(variables);
 
-    let res = client.post(SUBGRAPH_URL).json(&request_body).send().await?;
+    let res = client
+        .post(SUBGRAPH_URL.as_str())
+        .json(&request_body)
+        .send()
+        .await?;
     let response_body: GraphQLResponse<boost_query::ResponseData> = res.json().await?;
     let boost_query = response_body.data.ok_or("missing data from the hub")?;
 

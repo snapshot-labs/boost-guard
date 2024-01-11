@@ -5,14 +5,17 @@ use std::env;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use tokio::net::TcpListener;
+extern crate dotenv;
+
+use dotenv::dotenv;
 
 #[tokio::main]
 async fn main() {
-    let key = "PORT";
-    let port: u16 = match env::var(key) {
-        Ok(val) => val.parse::<u16>().unwrap(),
-        Err(_) => 8080,
-    };
+    dotenv().ok();
+
+    let port: u16 = env::var("PORT")
+        .map(|val| val.parse::<u16>().unwrap())
+        .unwrap_or(8080);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await.unwrap();
 
@@ -20,6 +23,8 @@ async fn main() {
 }
 
 fn app() -> Router {
+    dotenv().ok();
+
     let client = reqwest::Client::new();
     let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
     let wallet = ethers::signers::LocalWallet::from_str(&private_key)

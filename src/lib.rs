@@ -4,8 +4,20 @@ use hyper::http::StatusCode;
 pub mod routes;
 pub mod signatures;
 
-const HUB_URL: &str = "https://testnet.hub.snapshot.org/graphql";
-const SUBGRAPH_URL: &str = "https://api.thegraph.com/subgraphs/name/snapshot-labs/boost-sepolia";
+use std::env;
+extern crate dotenv;
+use dotenv::dotenv;
+#[macro_use]
+extern crate lazy_static;
+
+lazy_static! {
+    static ref HUB_URL: String = {
+        dotenv().ok();
+        env::var("HUB_URL").expect("Please add HUB_URL to your environment or .env file.")
+    };
+    static ref SUBGRAPH_URL: String = env::var("SUBGRAPH_URL")
+        .expect("Please add SUBGRAPH_URL to your environment or .env file.");
+}
 
 pub enum ServerError {
     ErrorString(String),
