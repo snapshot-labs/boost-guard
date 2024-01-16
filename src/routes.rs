@@ -179,7 +179,7 @@ impl TryFrom<BoostQueryBoostStrategyParamsEligibility> for BoostEligibility {
 
 #[derive(Debug)]
 pub enum DistributionType {
-    Weighted(Option<u128>),
+    Weighted(Option<u128>), // The option represents the maximum amount of tokens that can be rewarded.
     Even,
 }
 
@@ -291,15 +291,130 @@ fn compute_user_reward(
     cap: DistributionType,
 ) -> u128 {
     match cap {
-        DistributionType::Even => todo!(),
-        DistributionType::Weighted(limit) => {
+        DistributionType::Even => todo!(), // need to query number of voters
+        DistributionType::Weighted(cap) => {
             let reward = voting_power * pool / proposal_score;
-            if let Some(_limit) = limit {
-                todo!("implement cap");
-            } else {
-                reward
+            if let Some(limit) = cap {
+                if reward > limit {
+                    return limit;
+                }
             }
+
+            reward
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compute_user_reward, DistributionType};
+
+    #[test]
+    fn full_vp_no_cap() {
+        let voting_power = 100;
+        let proposal_score = 100;
+        let pool_size = 100;
+        let cap = DistributionType::Weighted(None);
+
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+
+        assert_eq!(reward, 100);
+    }
+
+    #[test]
+    fn full_vp_with_cap() {
+        let voting_power = 100;
+        let proposal_score = 100;
+        let pool_size = 100;
+        let cap = DistributionType::Weighted(Some(50));
+
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+
+        assert_eq!(reward, 50);
+    }
+
+    #[test]
+    fn full_vp_with_cap_not_reached() {
+        let voting_power = 100;
+        let proposal_score = 100;
+        let pool_size = 100;
+        let cap = DistributionType::Weighted(Some(110));
+
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+
+        assert_eq!(reward, 100);
+    }
+
+    #[test]
+    fn half_vp_no_cap() {
+        let voting_power = 50;
+        let proposal_score = 100;
+        let pool_size = 100;
+        let cap = DistributionType::Weighted(None);
+
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+
+        assert_eq!(reward, 50);
+    }
+
+    #[test]
+    fn half_vp_with_cap() {
+        let voting_power = 50;
+        let proposal_score = 100;
+        let pool_size = 100;
+        let cap = DistributionType::Weighted(Some(25));
+
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+
+        assert_eq!(reward, 25);
+    }
+
+    #[test]
+    fn half_vp_with_cap_not_reached() {
+        let voting_power = 50;
+        let proposal_score = 100;
+        let pool_size = 100;
+        let cap = DistributionType::Weighted(Some(75));
+
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+
+        assert_eq!(reward, 50);
+    }
+
+    #[test]
+    fn third_vp_no_cap() {
+        let voting_power = 10;
+        let proposal_score = 30;
+        let pool_size = 100;
+        let cap = DistributionType::Weighted(None);
+
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+
+        assert_eq!(reward, 33);
+    }
+
+    #[test]
+    fn third_vp_with_cap() {
+        let voting_power = 10;
+        let proposal_score = 30;
+        let pool_size = 100;
+        let cap = DistributionType::Weighted(Some(18));
+
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+
+        assert_eq!(reward, 18);
+    }
+
+    #[test]
+    fn third_vp_with_cap_not_reached() {
+        let voting_power = 10;
+        let proposal_score = 30;
+        let pool_size = 100;
+        let cap = DistributionType::Weighted(Some(50));
+
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+
+        assert_eq!(reward, 33);
     }
 }
 
