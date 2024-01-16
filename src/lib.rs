@@ -7,6 +7,7 @@ pub mod signatures;
 use std::env;
 extern crate dotenv;
 use dotenv::dotenv;
+
 #[macro_use]
 extern crate lazy_static;
 
@@ -25,22 +26,22 @@ lazy_static! {
         .expect("Please add VERIFYING_CONTRACT to your environment or .env file");
 }
 
+#[derive(Debug)]
 pub enum ServerError {
     ErrorString(String),
+}
+
+impl<T: std::string::ToString + Sized> From<T> for ServerError {
+    fn from(err: T) -> Self {
+        ServerError::ErrorString(err.to_string())
+    }
 }
 
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
         let ServerError::ErrorString(body) = self;
 
-        // its often easiest to implement `IntoResponse` by calling other implementations
         (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
-    }
-}
-
-impl<T: std::fmt::Debug> From<T> for ServerError {
-    fn from(error: T) -> Self {
-        ServerError::ErrorString(format!("{:?}", error))
     }
 }
 
