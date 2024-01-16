@@ -1,5 +1,5 @@
+use crate::routes::RewardInfo;
 use crate::{ServerError, BOOST_NAME, BOOST_VERSION, VERIFYING_CONTRACT};
-use core::convert::From;
 use ethers::signers::LocalWallet;
 use ethers::types::{
     transaction::eip712::{Eip712, TypedData},
@@ -22,13 +22,13 @@ impl ClaimConfig {
         boost_id: &str,
         chain_id: &str,
         recipient: &str,
-        amount: u128,
+        amount: &str,
     ) -> Result<Self, ServerError> {
         Ok(Self {
             boost_id: U256::from_str_radix(boost_id, 10)?,
             chain_id: U256::from_str_radix(chain_id, 10)?,
             recipient: recipient.parse()?,
-            amount: U256::from(amount),
+            amount: U256::from_str_radix(amount, 10)?,
         })
     }
 
@@ -88,6 +88,19 @@ impl ClaimConfig {
         signer
             .sign_hash(digest.into())
             .map_err(|e| ServerError::ErrorString(e.to_string()))
+    }
+}
+
+impl TryFrom<&RewardInfo> for ClaimConfig {
+    type Error = ServerError;
+
+    fn try_from(value: &RewardInfo) -> Result<Self, Self::Error> {
+        Self::new(
+            &value.boost_id,
+            &value.chain_id,
+            &value.voter_address,
+            &value.reward,
+        )
     }
 }
 

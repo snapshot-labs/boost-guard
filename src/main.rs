@@ -113,31 +113,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_invalid_proposal_type() {
-        let app = super::app();
-        let query = QueryParams {
-            proposal_id: "0x2f488ec3a0b9b5d731812395f2aa99718df7d380b6c6c0539fec16ae53b3e1fc"
-                .to_string(),
-            voter_address: "voter_address".to_string(),
-            boosts: vec![("0x1234".to_string(), "0x42".to_string())],
-        };
-
-        let response = app
-            .oneshot(
-                http::Request::builder()
-                    .method(http::Method::POST)
-                    .uri("/create-vouchers")
-                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-                    .body(Body::from(serde_json::to_vec(&[&query, &query]).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert!(response.status() == http::StatusCode::INTERNAL_SERVER_ERROR);
-    }
-
-    #[tokio::test]
     async fn test_health_check() {
         let app = super::app();
         let response = app

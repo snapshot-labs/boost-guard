@@ -29,6 +29,24 @@ pub struct GetRewardsResponse {
     pub boost_id: String,
 }
 
+impl From<RewardInfo> for GetRewardsResponse {
+    fn from(reward_info: RewardInfo) -> Self {
+        Self {
+            reward: reward_info.reward,
+            chain_id: reward_info.chain_id,
+            boost_id: reward_info.boost_id,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct RewardInfo {
+    pub voter_address: String,
+    pub reward: String,
+    pub chain_id: String,
+    pub boost_id: String,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct QueryParams {
     pub proposal_id: String,
@@ -177,11 +195,10 @@ impl FromStr for DistributionType {
     }
 }
 
-// todo: docs
-pub async fn create_vouchers_handler(
-    Extension(state): Extension<State>,
-    Json(p): Json<Value>,
-) -> Result<impl IntoResponse, ServerError> {
+async fn get_rewards_inner(
+    state: &State,
+    p: serde_json::Value,
+) -> Result<Vec<RewardInfo>, ServerError> {
     let request: QueryParams = serde_json::from_value(p)?;
 
     let proposal = get_proposal_info(&state.client, &request.proposal_id).await?;
@@ -216,72 +233,53 @@ pub async fn create_vouchers_handler(
             boost_info.params.distribution,
         );
 
-        let Ok(claim_cfg) = ClaimConfig::new(&boost_id, &chain_id, &request.voter_address, reward)
-        else {
+        response.push(RewardInfo {
+            voter_address: request.voter_address.clone(),
+            reward: reward.to_string(),
+            chain_id,
+            boost_id,
+        });
+    }
+
+    Ok(response)
+}
+
+// todo: docs
+pub async fn create_vouchers_handler(
+    Extension(state): Extension<State>,
+    Json(p): Json<Value>,
+) -> Result<impl IntoResponse, ServerError> {
+    let reward_infos = get_rewards_inner(&state, p).await.expect("hoho"); // todo
+
+    let mut response = Vec::with_capacity(reward_infos.len());
+    for reward_info in reward_infos {
+        let Ok(claim_cfg) = ClaimConfig::try_from(&reward_info) else {
             continue;
         };
         let Ok(signature) = claim_cfg.create_signature(&state.wallet) else {
             continue;
         };
+
         response.push(CreateVouchersResponse {
             signature: format!("0x{}", signature),
-            reward: reward.to_string(),
-            chain_id,
-            boost_id,
+            reward: reward_info.reward,
+            chain_id: reward_info.chain_id,
+            boost_id: reward_info.boost_id,
         });
     }
-
     Ok(Json(response))
 }
 
-// TODO: unify get_rewards_handle and create_voucher_handler
-
-// todo: check that proposal has ended
 pub async fn get_rewards_handler(
     Extension(state): Extension<State>,
     Json(p): Json<Value>,
 ) -> Result<impl IntoResponse, ServerError> {
-    let request: QueryParams = serde_json::from_value(p)?;
-
-    let proposal = get_proposal_info(&state.client, &request.proposal_id).await?;
-    let vote = get_vote_info(&state.client, &request.voter_address, &request.proposal_id).await?;
-
-    validate_end_time(proposal.end)?;
-    validate_type(&proposal.type_)?;
-
-    let mut response = Vec::with_capacity(request.boosts.len());
-    for (boost_id, chain_id) in request.boosts {
-        let Ok(boost_info) = get_boost_info(&state.client, &boost_id).await else {
-            continue;
-        };
-
-        let pool: u128 = boost_info.pool_size;
-        let decimals = boost_info.decimals;
-
-        if boost_info.params.proposal != request.proposal_id {
-            continue;
-        }
-
-        if validate_choice(vote.choice, boost_info.params.eligibility).is_err() {
-            continue;
-        }
-        // TODO: check cap
-
-        let voting_power = vote.voting_power * 10f64.powi(decimals as i32);
-        let score = proposal.score * 10f64.powi(decimals as i32);
-        let reward = compute_user_reward(
-            pool,
-            voting_power as u128,
-            score as u128,
-            boost_info.params.distribution,
-        );
-
-        response.push(GetRewardsResponse {
-            reward: reward.to_string(),
-            chain_id,
-            boost_id,
-        });
-    }
+    let response = get_rewards_inner(&state, p)
+        .await
+        .expect("heyehey")
+        .into_iter()
+        .map(GetRewardsResponse::from)
+        .collect::<Vec<_>>(); // todo
 
     Ok(Json(response))
 }
