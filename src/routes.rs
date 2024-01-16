@@ -1,3 +1,4 @@
+use crate::routes::boost_query::BoostQueryBoostStrategyParamsEligibility;
 use crate::signatures::ClaimConfig;
 use crate::State;
 use crate::{ServerError, HUB_URL, SUBGRAPH_URL};
@@ -8,6 +9,7 @@ use ethers::types::Address;
 use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::str::FromStr;
 use std::time::SystemTime;
 
 // TODO: check with BIG voting power (f64 precision?)
@@ -51,7 +53,6 @@ struct BoostQuery;
 )]
 struct ProposalQuery;
 
-// TODO: only works for basic ? idk
 type Any = u8;
 #[derive(GraphQLQuery)]
 #[graphql(
@@ -72,12 +73,12 @@ impl TryFrom<&str> for BoostStrategy {
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
             "proposal" => Ok(BoostStrategy::Proposal),
-            _ => Err("rip bozo invalid strategy"),
+            _ => Err("Invalid strategy"),
         }
     }
 }
 
-#[allow(dead_code)] // needed for strategy field
+#[allow(dead_code)] // needed for `strategy` field
 #[derive(Debug)]
 pub struct BoostInfo {
     strategy: BoostStrategy,
@@ -86,7 +87,6 @@ pub struct BoostInfo {
     decimals: u8,
 }
 
-// TODO: revamp this, make it cleaner
 impl TryFrom<boost_query::BoostQueryBoost> for BoostInfo {
     type Error = &'static str;
 
@@ -97,25 +97,9 @@ impl TryFrom<boost_query::BoostQueryBoost> for BoostInfo {
 
         match strategy_type {
             BoostStrategy::Proposal => {
-                let eligibility = match params.eligibility.type_.as_str() {
-                    "incentive" => BoostsEligibility::Incentive,
-                    "bribe" => {
-                        let choice = params
-                            .eligibility
-                            .choice
-                            .ok_or("missing choice")?
-                            .try_into()
-                            .unwrap(); // todo remove unwrap
-                        BoostsEligibility::Bribe(choice)
-                    }
-                    _ => unreachable!("invalid eligibility"),
-                };
+                let eligibility = BoostEligibility::try_from(params.eligibility)?;
 
-                let distribution = match params.distribution.type_.as_str() {
-                    "weighted" => DistributionType::Weighted(None),
-                    "even" => DistributionType::Even,
-                    _ => unreachable!("invalid distribution"),
-                };
+                let distribution = DistributionType::from_str(params.distribution.type_.as_str())?;
 
                 let bp = BoostParams {
                     version: params.version,
@@ -124,12 +108,15 @@ impl TryFrom<boost_query::BoostQueryBoost> for BoostInfo {
                     distribution,
                 };
 
-                let pool_size = value.pool_size.parse().expect("failed to parse pool size"); // todo: error
+                let pool_size = value
+                    .pool_size
+                    .parse()
+                    .map_err(|_| "failed to parse pool size")?;
                 let decimals = value
                     .token
                     .decimals
                     .parse()
-                    .expect("failed to parse decimals"); // todo: error
+                    .map_err(|_| "failed to parse decimals")?;
 
                 Ok(Self {
                     strategy: strategy_type,
@@ -147,14 +134,29 @@ impl TryFrom<boost_query::BoostQueryBoost> for BoostInfo {
 pub struct BoostParams {
     pub version: String,
     pub proposal: String,
-    pub eligibility: BoostsEligibility,
+    pub eligibility: BoostEligibility,
     pub distribution: DistributionType,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum BoostsEligibility {
+pub enum BoostEligibility {
     Incentive, // Everyone who votes is eligible, regardless of choice
     Bribe(u8), // Only those who voted for the specific choice are eligible
+}
+
+impl TryFrom<BoostQueryBoostStrategyParamsEligibility> for BoostEligibility {
+    type Error = &'static str;
+
+    fn try_from(value: BoostQueryBoostStrategyParamsEligibility) -> Result<Self, Self::Error> {
+        match value.type_.as_str() {
+            "incentive" => Ok(BoostEligibility::Incentive),
+            "bribe" => {
+                let choice = value.choice.ok_or("missing choice")?.try_into().unwrap(); // todo remove unwrap
+                Ok(BoostEligibility::Bribe(choice))
+            }
+            _ => Err("invalid eligibility"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -163,8 +165,19 @@ pub enum DistributionType {
     Even,
 }
 
+impl FromStr for DistributionType {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "weighted" => Ok(DistributionType::Weighted(None)),
+            "even" => Ok(DistributionType::Even),
+            _ => Err("invalid distribution"),
+        }
+    }
+}
+
 // todo: docs
-// todo: check that proposal has ended
 pub async fn create_vouchers_handler(
     Extension(state): Extension<State>,
     Json(p): Json<Value>,
@@ -174,7 +187,7 @@ pub async fn create_vouchers_handler(
     let proposal = get_proposal_info(&state.client, &request.proposal_id).await?;
     let vote = get_vote_info(&state.client, &request.voter_address, &request.proposal_id).await?;
 
-    validate_end_time(proposal.end)?;
+    validate_end_time(proposal.end)?; // We do not need to validate start_time because the smart-contract will do it anyway
     validate_type(&proposal.type_)?;
 
     let mut response = Vec::with_capacity(request.boosts.len());
@@ -316,10 +329,10 @@ fn validate_type(type_: &str) -> Result<(), ServerError> {
     }
 }
 
-fn validate_choice(choice: u8, boost_eligibility: BoostsEligibility) -> Result<(), ServerError> {
+fn validate_choice(choice: u8, boost_eligibility: BoostEligibility) -> Result<(), ServerError> {
     match boost_eligibility {
-        BoostsEligibility::Incentive => Ok(()),
-        BoostsEligibility::Bribe(boosted_choice) => {
+        BoostEligibility::Incentive => Ok(()),
+        BoostEligibility::Bribe(boosted_choice) => {
             if choice != boosted_choice {
                 Err(ServerError::ErrorString(format!(
                     "voter voted {:} but needed to vote {} to be eligible",

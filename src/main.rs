@@ -28,11 +28,11 @@ fn app() -> Router {
     let client = reqwest::Client::new();
     let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
     let wallet = ethers::signers::LocalWallet::from_str(&private_key)
-        .expect("failed to create a local wallet"); // todo check hex
+        .expect("failed to create a local wallet");
     let state = boost_guard::State { client, wallet };
 
     Router::new()
-        .route("/create-vouchers", post(create_vouchers_handler)) // todo: create-voucherS
+        .route("/create-vouchers", post(create_vouchers_handler))
         .route("/get-rewards", post(get_rewards_handler))
         .route("/health", get(health_handler))
         .layer(Extension(state))
@@ -46,6 +46,8 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
+    // TODO: those test use fixed proposals and voter addresses, but these change from time to time as we delete
+    // proposals from the hub... we should probably settle for a fixed proposal and voter address and use those
     #[tokio::test]
     async fn test_create_vouchers() {
         let app = super::app();
