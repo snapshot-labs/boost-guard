@@ -12,9 +12,9 @@ pub struct ClaimConfig {
     boost_id: U256,
     chain_id: U256,
     // The address of the recipient for the claim
-    recipient: Address, // address
+    recipient: Address,
     // The amount of boost token in the claim
-    amount: U256, // uint256
+    amount: U256,
 }
 
 impl ClaimConfig {
