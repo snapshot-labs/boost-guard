@@ -231,6 +231,7 @@ async fn get_rewards_inner(
             voting_power as u128,
             score as u128,
             boost_info.params.distribution,
+            proposal.votes,
         );
 
         response.push(RewardInfo {
@@ -289,9 +290,10 @@ fn compute_user_reward(
     voting_power: u128,
     proposal_score: u128,
     cap: DistributionType,
+    votes: u64,
 ) -> u128 {
     match cap {
-        DistributionType::Even => todo!(), // need to query number of voters
+        DistributionType::Even => pool / (votes as u128),
         DistributionType::Weighted(cap) => {
             let reward = voting_power * pool / proposal_score;
             if let Some(limit) = cap {
@@ -314,9 +316,10 @@ mod tests {
         let voting_power = 100;
         let proposal_score = 100;
         let pool_size = 100;
+        let votes = 1;
         let cap = DistributionType::Weighted(None);
 
-        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
         assert_eq!(reward, 100);
     }
@@ -326,9 +329,10 @@ mod tests {
         let voting_power = 100;
         let proposal_score = 100;
         let pool_size = 100;
+        let votes = 1;
         let cap = DistributionType::Weighted(Some(50));
 
-        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
         assert_eq!(reward, 50);
     }
@@ -338,9 +342,10 @@ mod tests {
         let voting_power = 100;
         let proposal_score = 100;
         let pool_size = 100;
+        let votes = 1;
         let cap = DistributionType::Weighted(Some(110));
 
-        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
         assert_eq!(reward, 100);
     }
@@ -350,9 +355,10 @@ mod tests {
         let voting_power = 50;
         let proposal_score = 100;
         let pool_size = 100;
+        let votes = 2;
         let cap = DistributionType::Weighted(None);
 
-        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
         assert_eq!(reward, 50);
     }
@@ -362,9 +368,10 @@ mod tests {
         let voting_power = 50;
         let proposal_score = 100;
         let pool_size = 100;
+        let votes = 2;
         let cap = DistributionType::Weighted(Some(25));
 
-        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
         assert_eq!(reward, 25);
     }
@@ -374,9 +381,10 @@ mod tests {
         let voting_power = 50;
         let proposal_score = 100;
         let pool_size = 100;
+        let votes = 2;
         let cap = DistributionType::Weighted(Some(75));
 
-        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
         assert_eq!(reward, 50);
     }
@@ -386,9 +394,10 @@ mod tests {
         let voting_power = 10;
         let proposal_score = 30;
         let pool_size = 100;
+        let votes = 3;
         let cap = DistributionType::Weighted(None);
 
-        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
         assert_eq!(reward, 33);
     }
@@ -398,9 +407,10 @@ mod tests {
         let voting_power = 10;
         let proposal_score = 30;
         let pool_size = 100;
+        let votes = 3;
         let cap = DistributionType::Weighted(Some(18));
 
-        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
         assert_eq!(reward, 18);
     }
@@ -410,9 +420,36 @@ mod tests {
         let voting_power = 10;
         let proposal_score = 30;
         let pool_size = 100;
+        let votes = 3;
         let cap = DistributionType::Weighted(Some(50));
 
-        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap);
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
+
+        assert_eq!(reward, 33);
+    }
+
+    #[test]
+    fn even_distribution_two() {
+        let voting_power = 100;
+        let proposal_score = 100;
+        let pool_size = 100;
+        let votes = 2;
+        let cap = DistributionType::Even;
+
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
+
+        assert_eq!(reward, 50);
+    }
+
+    #[test]
+    fn even_distribution_three() {
+        let voting_power = 10;
+        let proposal_score = 30;
+        let pool_size = 100;
+        let votes = 3;
+        let cap = DistributionType::Even;
+
+        let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
         assert_eq!(reward, 33);
     }
@@ -505,6 +542,7 @@ struct Proposal {
     type_: String,
     score: f64,
     end: u64,
+    votes: u64,
 }
 
 impl TryFrom<proposal_query::ProposalQueryProposal> for Proposal {
@@ -516,11 +554,17 @@ impl TryFrom<proposal_query::ProposalQueryProposal> for Proposal {
             .scores_total
             .ok_or("missing proposal score from the hub")?;
         let proposal_end = proposal.end.try_into()?;
+        let votes = proposal
+            .votes
+            .ok_or("missing votes from the hub")?
+            .try_into()
+            .map_err(|_| ServerError::ErrorString("failed to parse votes".to_string()))?;
 
         Ok(Proposal {
             type_: proposal_type,
             score: proposal_score,
             end: proposal_end,
+            votes,
         })
     }
 }
@@ -541,16 +585,11 @@ async fn get_proposal_info(
         .send()
         .await?;
     let response_body: GraphQLResponse<proposal_query::ResponseData> = res.json().await?;
-    let tutu = response_body.data.ok_or("missing data from the hub")?;
-    println!("TUTU: {:?}", tutu);
-    let proposal_query: proposal_query::ProposalQueryProposal =
-        tutu.proposal.ok_or("missing proposal data from the hub")?;
-
-    // let proposal_query: proposal_query::ProposalQueryProposal = response_body
-    //     .data
-    //     .ok_or("missing data from the hub")?
-    //     .proposal
-    //     .ok_or("missing proposal data from the hub")?;
+    let proposal_query: proposal_query::ProposalQueryProposal = response_body
+        .data
+        .ok_or("missing data from the hub")?
+        .proposal
+        .ok_or("missing proposal data from the hub")?;
     Proposal::try_from(proposal_query)
 }
 
