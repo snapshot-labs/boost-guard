@@ -9,16 +9,14 @@ query BoostQuery($id: String!) {
     }
     strategy {
       name
-      params {
-        version
-        proposal
-        eligibility {
-            type
-            choice
-        }
-        distribution {
-            type
-        }
+      version
+      proposal
+      eligibility {
+          type
+          choice
+      }
+      distribution {
+          type
       }
     } 
   }

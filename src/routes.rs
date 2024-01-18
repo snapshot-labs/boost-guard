@@ -1,4 +1,5 @@
-use crate::routes::boost_query::BoostQueryBoostStrategyParamsEligibility;
+use crate::routes::boost_query::BoostQueryBoostStrategy;
+use crate::routes::boost_query::BoostQueryBoostStrategyEligibility;
 use crate::signatures::ClaimConfig;
 use crate::State;
 use crate::{ServerError, HUB_URL, SUBGRAPH_URL};
@@ -109,19 +110,20 @@ impl TryFrom<boost_query::BoostQueryBoost> for BoostInfo {
     type Error = &'static str;
 
     fn try_from(value: boost_query::BoostQueryBoost) -> Result<Self, Self::Error> {
-        let name = value.strategy.name.as_str();
-        let params = value.strategy.params;
+        let strategy: BoostQueryBoostStrategy = value.strategy.ok_or("heyhey")?;
+        let name = strategy.name.as_str();
         let strategy_type = BoostStrategy::try_from(name).unwrap();
 
         match strategy_type {
             BoostStrategy::Proposal => {
-                let eligibility = BoostEligibility::try_from(params.eligibility)?;
+                let eligibility = BoostEligibility::try_from(strategy.eligibility)?;
 
-                let distribution = DistributionType::from_str(params.distribution.type_.as_str())?;
+                let distribution =
+                    DistributionType::from_str(strategy.distribution.type_.as_str())?;
 
                 let bp = BoostParams {
-                    version: params.version,
-                    proposal: params.proposal,
+                    version: strategy.version,
+                    proposal: strategy.proposal,
                     eligibility,
                     distribution,
                 };
@@ -162,10 +164,10 @@ pub enum BoostEligibility {
     Bribe(u8), // Only those who voted for the specific choice are eligible
 }
 
-impl TryFrom<BoostQueryBoostStrategyParamsEligibility> for BoostEligibility {
+impl TryFrom<BoostQueryBoostStrategyEligibility> for BoostEligibility {
     type Error = &'static str;
 
-    fn try_from(value: BoostQueryBoostStrategyParamsEligibility) -> Result<Self, Self::Error> {
+    fn try_from(value: BoostQueryBoostStrategyEligibility) -> Result<Self, Self::Error> {
         match value.type_.as_str() {
             "incentive" => Ok(BoostEligibility::Incentive),
             "bribe" => {
