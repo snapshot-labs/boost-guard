@@ -122,7 +122,7 @@ type Any = u8;
 )]
 struct VotesQuery;
 
-// Different strategies supported
+// List of different types of strategies supported
 #[derive(Debug)]
 enum BoostStrategy {
     Proposal, // Boost a specific proposal
@@ -280,6 +280,7 @@ impl TryFrom<proposal_query::ProposalQueryProposal> for Proposal {
     }
 }
 
+// Helper function to compute the rewards for a given boost and a user request
 async fn get_rewards_inner(
     state: &State,
     p: serde_json::Value,
@@ -289,7 +290,7 @@ async fn get_rewards_inner(
     let proposal = get_proposal_info(&state.client, &request.proposal_id).await?;
     let vote = get_vote_info(&state.client, &request.voter_address, &request.proposal_id).await?;
 
-    validate_end_time(proposal.end)?; // We do not need to validate start_time because the smart-contract will do it anyway
+    validate_end_time(proposal.end)?;
     validate_type(&proposal.type_)?;
 
     let mut response = Vec::with_capacity(request.boosts.len());
@@ -412,6 +413,7 @@ async fn get_vote_info(
     })
 }
 
+// We don't need to validate start_time because the smart-contract will do it anyway.
 fn validate_end_time(end: u64) -> Result<(), ServerError> {
     let current_timestamp = SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -426,6 +428,8 @@ fn validate_end_time(end: u64) -> Result<(), ServerError> {
     }
 }
 
+// Only single-choice and basic proposals are eligible for boosting.
+// The other types are not supported yet (and not for the near future).
 fn validate_type(type_: &str) -> Result<(), ServerError> {
     if (type_ != "single-choice") && (type_ != "basic") {
         Err(ServerError::ErrorString(format!(
