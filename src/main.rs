@@ -1,6 +1,6 @@
 use axum::routing::{get, post};
 use axum::{Extension, Router};
-use boost_guard::routes::{create_vouchers_handler, get_rewards_handler, health_handler};
+use boost_guard::routes::{handle_create_vouchers, handle_get_rewards, handle_health};
 use std::env;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -32,9 +32,9 @@ fn app() -> Router {
     let state = boost_guard::State { client, wallet };
 
     Router::new()
-        .route("/create-vouchers", post(create_vouchers_handler))
-        .route("/get-rewards", post(get_rewards_handler))
-        .route("/health", get(health_handler))
+        .route("/create-vouchers", post(handle_create_vouchers))
+        .route("/get-rewards", post(handle_get_rewards))
+        .route("/health", get(handle_health))
         .layer(Extension(state))
 }
 
