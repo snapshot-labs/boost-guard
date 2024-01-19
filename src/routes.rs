@@ -13,6 +13,48 @@ use serde_json::Value;
 use std::str::FromStr;
 use std::time::SystemTime;
 
+pub async fn handle_create_vouchers(
+    Extension(state): Extension<State>,
+    Json(p): Json<Value>,
+) -> Result<impl IntoResponse, ServerError> {
+    let reward_infos = get_rewards_inner(&state, p).await?;
+
+    let mut response = Vec::with_capacity(reward_infos.len());
+    for reward_info in reward_infos {
+        let Ok(claim_cfg) = ClaimConfig::try_from(&reward_info) else {
+            continue;
+        };
+        let Ok(signature) = claim_cfg.create_signature(&state.wallet) else {
+            continue;
+        };
+
+        response.push(CreateVouchersResponse {
+            signature: format!("0x{}", signature),
+            reward: reward_info.reward,
+            chain_id: reward_info.chain_id,
+            boost_id: reward_info.boost_id,
+        });
+    }
+    Ok(Json(response))
+}
+
+pub async fn handle_get_rewards(
+    Extension(state): Extension<State>,
+    Json(p): Json<Value>,
+) -> Result<impl IntoResponse, ServerError> {
+    let response = get_rewards_inner(&state, p)
+        .await?
+        .into_iter()
+        .map(GetRewardsResponse::from)
+        .collect::<Vec<_>>(); // todo
+
+    Ok(Json(response))
+}
+
+pub async fn handle_health() -> Result<impl IntoResponse, ServerError> {
+    Ok(axum::response::Html("Healthy!"))
+}
+
 // TODO: check with BIG voting power (f64 precision?)
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateVouchersResponse {
@@ -258,6 +300,7 @@ async fn get_rewards_inner(
         let pool: u128 = boost_info.pool_size;
         let decimals: u8 = boost_info.decimals;
 
+        // Ensure the requested proposal id actually corresponds to the boosted proposal
         if boost_info.params.proposal != request.proposal_id {
             continue;
         }
@@ -265,7 +308,6 @@ async fn get_rewards_inner(
         if validate_choice(vote.choice, boost_info.params.eligibility).is_err() {
             continue;
         }
-        // TODO: check cap
 
         let voting_power = vote.voting_power * 10f64.powi(decimals as i32);
         let score = proposal.score * 10f64.powi(decimals as i32);
@@ -286,48 +328,6 @@ async fn get_rewards_inner(
     }
 
     Ok(response)
-}
-
-pub async fn handle_create_vouchers(
-    Extension(state): Extension<State>,
-    Json(p): Json<Value>,
-) -> Result<impl IntoResponse, ServerError> {
-    let reward_infos = get_rewards_inner(&state, p).await?;
-
-    let mut response = Vec::with_capacity(reward_infos.len());
-    for reward_info in reward_infos {
-        let Ok(claim_cfg) = ClaimConfig::try_from(&reward_info) else {
-            continue;
-        };
-        let Ok(signature) = claim_cfg.create_signature(&state.wallet) else {
-            continue;
-        };
-
-        response.push(CreateVouchersResponse {
-            signature: format!("0x{}", signature),
-            reward: reward_info.reward,
-            chain_id: reward_info.chain_id,
-            boost_id: reward_info.boost_id,
-        });
-    }
-    Ok(Json(response))
-}
-
-pub async fn handle_get_rewards(
-    Extension(state): Extension<State>,
-    Json(p): Json<Value>,
-) -> Result<impl IntoResponse, ServerError> {
-    let response = get_rewards_inner(&state, p)
-        .await?
-        .into_iter()
-        .map(GetRewardsResponse::from)
-        .collect::<Vec<_>>(); // todo
-
-    Ok(Json(response))
-}
-
-pub async fn handle_health() -> Result<impl IntoResponse, ServerError> {
-    Ok(axum::response::Html("Healthy!"))
 }
 
 async fn get_proposal_info(
@@ -410,6 +410,46 @@ async fn get_vote_info(
         voting_power: vote.vp.ok_or("missing vp from the hub")?,
         choice: vote.choice,
     })
+}
+
+fn validate_end_time(end: u64) -> Result<(), ServerError> {
+    let current_timestamp = SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap() // Safe to unwrap because we are sure that the current time is after the UNIX_EPOCH
+        .as_secs();
+    if current_timestamp < end {
+        Err(ServerError::ErrorString(format!(
+            "proposal has not ended yet: {end:} > {current_timestamp:}",
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_type(type_: &str) -> Result<(), ServerError> {
+    if (type_ != "single-choice") && (type_ != "basic") {
+        Err(ServerError::ErrorString(format!(
+            "`{type_:}` proposals are not eligible for boosting"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_choice(choice: u8, boost_eligibility: BoostEligibility) -> Result<(), ServerError> {
+    match boost_eligibility {
+        BoostEligibility::Incentive => Ok(()),
+        BoostEligibility::Bribe(boosted_choice) => {
+            if choice != boosted_choice {
+                Err(ServerError::ErrorString(format!(
+                    "voter voted {:} but needed to vote {} to be eligible",
+                    choice, boosted_choice
+                )))
+            } else {
+                Ok(())
+            }
+        }
+    }
 }
 
 fn compute_user_reward(
@@ -579,45 +619,5 @@ mod tests {
         let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
         assert_eq!(reward, 33);
-    }
-}
-
-fn validate_end_time(end: u64) -> Result<(), ServerError> {
-    let current_timestamp = SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap() // Safe to unwrap because we are sure that the current time is after the UNIX_EPOCH
-        .as_secs();
-    if current_timestamp < end {
-        Err(ServerError::ErrorString(format!(
-            "proposal has not ended yet: {end:} > {current_timestamp:}",
-        )))
-    } else {
-        Ok(())
-    }
-}
-
-fn validate_type(type_: &str) -> Result<(), ServerError> {
-    if (type_ != "single-choice") && (type_ != "basic") {
-        Err(ServerError::ErrorString(format!(
-            "`{type_:}` proposals are not eligible for boosting"
-        )))
-    } else {
-        Ok(())
-    }
-}
-
-fn validate_choice(choice: u8, boost_eligibility: BoostEligibility) -> Result<(), ServerError> {
-    match boost_eligibility {
-        BoostEligibility::Incentive => Ok(()),
-        BoostEligibility::Bribe(boosted_choice) => {
-            if choice != boosted_choice {
-                Err(ServerError::ErrorString(format!(
-                    "voter voted {:} but needed to vote {} to be eligible",
-                    choice, boosted_choice
-                )))
-            } else {
-                Ok(())
-            }
-        }
     }
 }
