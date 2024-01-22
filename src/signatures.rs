@@ -76,9 +76,9 @@ impl ClaimConfig {
             "verifyingContract": VERIFYING_CONTRACT.as_str(),
           },
           "message": {
-            "boostId": format!("{}", self.boost_id),
+            "boostId": self.boost_id.to_string(),
             "recipient": format!("{:?}", self.recipient),
-            "amount": format!("{}", self.amount),
+            "amount": self.amount.to_string(),
           }
         });
 
@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn test_simple_sig() {
-        // Fix those env vars
+        // Set those env vars for easy testing
         std::env::set_var(
             "PRIVATE_KEY",
             "0xafdfd9c3d2095ef696594f6cedcae59e72dcd697e2a7521b1578140422a4f890",
