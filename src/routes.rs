@@ -335,7 +335,7 @@ async fn get_rewards_inner(
 
         let (adjusted_score, adjusted_pool) =
             if let Some(limit) = boost_info.params.distribution.limit() {
-                compute_extra_vp(
+                adjust_values_due_to_limit(
                     &state.client,
                     pool,
                     score,
@@ -493,7 +493,7 @@ fn validate_choice(choice: u8, boost_eligibility: BoostEligibility) -> Result<()
 }
 
 // TODO: cache
-async fn compute_extra_vp(
+async fn adjust_values_due_to_limit(
     client: &reqwest::Client,
     pool: u128,
     score: u128,
@@ -522,7 +522,7 @@ async fn compute_extra_vp(
         .json()
         .await?;
 
-    Ok(compute_extra_vp_inner(
+    Ok(adjust_values_due_to_limit_inner(
         res.votes.unwrap(),
         vp_limit_decimal,
         pool,
@@ -532,7 +532,7 @@ async fn compute_extra_vp(
     ))
 }
 
-fn compute_extra_vp_inner(
+fn adjust_values_due_to_limit_inner(
     votes: Vec<Option<whale_votes_query::WhaleVotesQueryVotes>>,
     vp_limit_decimal: f64,
     pool: u128,
@@ -557,7 +557,7 @@ fn compute_extra_vp_inner(
 mod test_compute_extra_vp {
     use std::vec;
 
-    use super::compute_extra_vp_inner;
+    use super::adjust_values_due_to_limit_inner;
     use super::whale_votes_query::WhaleVotesQueryVotes;
 
     #[test]
@@ -578,8 +578,14 @@ mod test_compute_extra_vp {
         let reward_limit_decimal = reward_limit as f64 / pow;
         let vp_limit_decimal = reward_limit_decimal * score_decimal / pool_decimal;
 
-        let (adjusted_score, adjusted_pool) =
-            compute_extra_vp_inner(votes, vp_limit_decimal, pool, score, reward_limit, decimals);
+        let (adjusted_score, adjusted_pool) = adjust_values_due_to_limit_inner(
+            votes,
+            vp_limit_decimal,
+            pool,
+            score,
+            reward_limit,
+            decimals,
+        );
         assert_eq!(adjusted_score, (9.0 * pow) as u128);
         assert_eq!(adjusted_pool, (90.0 * pow) as u128);
     }
