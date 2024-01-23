@@ -122,6 +122,14 @@ type Any = u8;
 )]
 struct VotesQuery;
 
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "src/graphql/hub_schema.graphql",
+    query_path = "src/graphql/whale_votes_query.graphql",
+    response_derives = "Debug"
+)]
+struct WhaleVotesQuery;
+
 // List of different types of strategies supported
 #[derive(Debug)]
 enum BoostStrategy {
@@ -230,6 +238,15 @@ pub enum DistributionType {
     Even,
 }
 
+impl DistributionType {
+    fn limit(&self) -> Option<u128> {
+        match self {
+            DistributionType::Weighted(reward_limit) => *reward_limit,
+            DistributionType::Even => None,
+        }
+    }
+}
+
 impl FromStr for DistributionType {
     type Err = &'static str;
 
@@ -287,7 +304,9 @@ async fn get_rewards_inner(
 ) -> Result<Vec<RewardInfo>, ServerError> {
     let request: QueryParams = serde_json::from_value(p)?;
 
-    let proposal = get_proposal_info(&state.client, &request.proposal_id).await?;
+    // TODO: We could cache the result (only if valid)
+    let proposal: Proposal = get_proposal_info(&state.client, &request.proposal_id).await?;
+    // TODO: We could cache the result (only if valid)
     let vote = get_vote_info(&state.client, &request.voter_address, &request.proposal_id).await?;
 
     validate_end_time(proposal.end)?;
@@ -310,12 +329,29 @@ async fn get_rewards_inner(
             continue;
         }
 
-        let voting_power = vote.voting_power * 10f64.powi(decimals as i32);
-        let score = proposal.score * 10f64.powi(decimals as i32);
+        let pow_f64 = 10f64.powi(decimals as i32);
+        let voting_power = (vote.voting_power * pow_f64) as u128;
+        let score = (proposal.score * pow_f64) as u128;
+
+        let (adjusted_score, adjusted_pool) =
+            if let Some(limit) = boost_info.params.distribution.limit() {
+                compute_extra_vp(
+                    &state.client,
+                    pool,
+                    score,
+                    limit as f64 / pow_f64,
+                    &request.proposal_id,
+                    decimals as i32,
+                )
+                .await?
+            } else {
+                (score, pool)
+            };
+
         let reward = compute_user_reward(
-            pool,
+            adjusted_pool,
             voting_power as u128,
-            score as u128,
+            adjusted_score,
             boost_info.params.distribution,
             proposal.votes,
         );
@@ -456,6 +492,99 @@ fn validate_choice(choice: u8, boost_eligibility: BoostEligibility) -> Result<()
     }
 }
 
+// TODO: cache
+async fn compute_extra_vp(
+    client: &reqwest::Client,
+    pool: u128,
+    score: u128,
+    reward_limit_decimal: f64,
+    proposal_id: &str,
+    decimals: i32,
+) -> Result<(u128, u128), ServerError> {
+    let pow_f64 = 10f64.powi(decimals);
+
+    let score_decimal = (score as f64) / pow_f64;
+    let pool_decimal = (pool as f64) / pow_f64;
+    let vp_limit_decimal = reward_limit_decimal * score_decimal / pool_decimal;
+
+    let reward_limit = (reward_limit_decimal * pow_f64) as u128;
+
+    let variables = whale_votes_query::Variables {
+        proposal: proposal_id.to_owned(),
+        vp_limit: vp_limit_decimal,
+    };
+    let request_body = WhaleVotesQuery::build_query(variables);
+    let res: whale_votes_query::ResponseData = client
+        .post(HUB_URL.as_str())
+        .json(&request_body)
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    Ok(compute_extra_vp_inner(
+        res.votes.unwrap(),
+        vp_limit_decimal,
+        pool,
+        score,
+        reward_limit,
+        decimals,
+    ))
+}
+
+fn compute_extra_vp_inner(
+    votes: Vec<Option<whale_votes_query::WhaleVotesQueryVotes>>,
+    vp_limit_decimal: f64,
+    pool: u128,
+    score: u128,
+    reward_limit: u128,
+    decimals: i32,
+) -> (u128, u128) {
+    let pow_f64 = 10f64.powi(decimals);
+    let extra_vp = (votes.iter().fold(0.0, |acc, vote| {
+        acc + vote.as_ref().unwrap().vp.unwrap() - vp_limit_decimal
+    }) * pow_f64) as u128;
+
+    let num_extra_vp = votes.len() as u128;
+    let vp_limit = (vp_limit_decimal * pow_f64) as u128;
+    let adjusted_score = score - vp_limit * num_extra_vp - extra_vp;
+    let adjusted_pool = pool - (reward_limit * num_extra_vp);
+
+    (adjusted_score, adjusted_pool)
+}
+
+#[cfg(test)]
+mod test_compute_extra_vp {
+    use std::vec;
+
+    use super::compute_extra_vp_inner;
+    use super::whale_votes_query::WhaleVotesQueryVotes;
+
+    #[test]
+    fn test_compute_extra_vp_1() {
+        let user1 = WhaleVotesQueryVotes {
+            vp: Some(91.0),
+            choice: 1,
+        };
+        let decimals = 18_i32;
+        let pow = 10f64.powi(decimals);
+        let votes = vec![Some(user1)];
+
+        let score = (100.0 * pow) as u128;
+        let pool = (200.0 * pow) as u128;
+        let score_decimal = (score as f64) / pow;
+        let pool_decimal = (pool as f64) / pow;
+        let reward_limit = (110.0 * pow) as u128;
+        let reward_limit_decimal = reward_limit as f64 / pow;
+        let vp_limit_decimal = reward_limit_decimal * score_decimal / pool_decimal;
+
+        let (adjusted_score, adjusted_pool) =
+            compute_extra_vp_inner(votes, vp_limit_decimal, pool, score, reward_limit, decimals);
+        assert_eq!(adjusted_score, (9.0 * pow) as u128);
+        assert_eq!(adjusted_pool, (90.0 * pow) as u128);
+    }
+}
+
 fn compute_user_reward(
     pool: u128,
     voting_power: u128,
@@ -479,7 +608,7 @@ fn compute_user_reward(
 }
 
 #[cfg(test)]
-mod tests {
+mod test_compute_user_reward {
     use super::{compute_user_reward, DistributionType};
 
     #[test]

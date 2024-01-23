@@ -1,0 +1,11 @@
+query WhaleVotesQuery($proposal: String!, $vp_limit: Float!) {
+  votes (
+    where: {
+      proposal: $proposal
+      vp_gt: $limit
+    }
+  ) {
+    choice
+    vp
+  }
+}
