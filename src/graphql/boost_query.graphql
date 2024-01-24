@@ -17,6 +17,7 @@ query BoostQuery($id: String!) {
       }
       distribution {
           type
+          limit
       }
     } 
   }

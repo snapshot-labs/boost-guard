@@ -7,11 +7,14 @@ use ::axum::extract::Json;
 use axum::response::IntoResponse;
 use axum::Extension;
 use ethers::types::Address;
+use ethers::types::U256;
 use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::str::FromStr;
 use std::time::SystemTime;
+
+use self::boost_query::BoostQueryBoostStrategyDistribution;
 
 pub async fn handle_create_vouchers(
     Extension(state): Extension<State>,
@@ -152,7 +155,7 @@ impl TryFrom<&str> for BoostStrategy {
 pub struct BoostInfo {
     strategy: BoostStrategy,
     params: BoostParams,
-    pool_size: u128,
+    pool_size: U256,
     decimals: u8,
 }
 
@@ -168,8 +171,7 @@ impl TryFrom<boost_query::BoostQueryBoost> for BoostInfo {
             BoostStrategy::Proposal => {
                 let eligibility = BoostEligibility::try_from(strategy.eligibility)?;
 
-                let distribution =
-                    DistributionType::from_str(strategy.distribution.type_.as_str())?;
+                let distribution = DistributionType::try_from(strategy.distribution)?;
 
                 let bp = BoostParams {
                     version: strategy.version,
@@ -232,14 +234,14 @@ impl TryFrom<BoostQueryBoostStrategyEligibility> for BoostEligibility {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum DistributionType {
-    Weighted(Option<u128>), // The option represents the maximum amount of tokens that can be rewarded.
+    Weighted(Option<U256>), // The option represents the maximum amount of tokens that can be rewarded.
     Even,
 }
 
 impl DistributionType {
-    fn limit(&self) -> Option<u128> {
+    fn limit(&self) -> Option<U256> {
         match self {
             DistributionType::Weighted(reward_limit) => *reward_limit,
             DistributionType::Even => None,
@@ -247,12 +249,14 @@ impl DistributionType {
     }
 }
 
-impl FromStr for DistributionType {
-    type Err = &'static str;
+impl TryFrom<boost_query::BoostQueryBoostStrategyDistribution> for DistributionType {
+    type Error = &'static str;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "weighted" => Ok(DistributionType::Weighted(None)),
+    fn try_from(value: BoostQueryBoostStrategyDistribution) -> Result<Self, Self::Error> {
+        match value.type_.as_str() {
+            "weighted" => Ok(DistributionType::Weighted(
+                value.limit.map(|limit| U256::from_str(&limit).unwrap()),
+            )),
             "even" => Ok(DistributionType::Even),
             _ => Err("invalid distribution"),
         }
@@ -317,7 +321,6 @@ async fn get_rewards_inner(
         let Ok(boost_info) = get_boost_info(&state.client, &boost_id).await else {
             continue;
         };
-        let pool: u128 = boost_info.pool_size;
         let decimals: u8 = boost_info.decimals;
 
         // Ensure the requested proposal id actually corresponds to the boosted proposal
@@ -329,28 +332,32 @@ async fn get_rewards_inner(
             continue;
         }
 
-        let pow_f64 = 10f64.powi(decimals as i32);
-        let voting_power = (vote.voting_power * pow_f64) as u128;
-        let score = (proposal.score * pow_f64) as u128;
+        let pow_f64 = 10f64.powi(decimals as i32); // cache
+        let voting_power = U256::from((vote.voting_power * pow_f64) as u128);
+        let score = U256::from((proposal.score * pow_f64) as u128);
+        let pool_decimal = boost_info.pool_size.as_u128() as f64 / pow_f64;
 
         let (adjusted_score, adjusted_pool) =
             if let Some(limit) = boost_info.params.distribution.limit() {
+                let reward_limit_decimal = limit.as_u128() as f64 / pow_f64;
                 adjust_values_due_to_limit(
                     &state.client,
-                    pool,
+                    pool_decimal,
+                    boost_info.pool_size,
+                    proposal.score,
                     score,
-                    limit as f64 / pow_f64,
+                    reward_limit_decimal,
                     &request.proposal_id,
                     decimals as i32,
                 )
                 .await?
             } else {
-                (score, pool)
+                (score, boost_info.pool_size)
             };
 
         let reward = compute_user_reward(
             adjusted_pool,
-            voting_power as u128,
+            voting_power,
             adjusted_score,
             boost_info.params.distribution,
             proposal.votes,
@@ -492,22 +499,23 @@ fn validate_choice(choice: u8, boost_eligibility: BoostEligibility) -> Result<()
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 // TODO: cache
 async fn adjust_values_due_to_limit(
     client: &reqwest::Client,
-    pool: u128,
-    score: u128,
+    pool_decimal: f64,
+    pool: U256,
+    score_decimal: f64,
+    score: U256,
     reward_limit_decimal: f64,
     proposal_id: &str,
     decimals: i32,
-) -> Result<(u128, u128), ServerError> {
-    let pow_f64 = 10f64.powi(decimals);
+) -> Result<(U256, U256), ServerError> {
+    let pow_f64 = 10f64.powi(decimals); // cache
 
-    let score_decimal = (score as f64) / pow_f64;
-    let pool_decimal = (pool as f64) / pow_f64;
     let vp_limit_decimal = reward_limit_decimal * score_decimal / pool_decimal;
 
-    let reward_limit = (reward_limit_decimal * pow_f64) as u128;
+    let reward_limit = U256::from((reward_limit_decimal * pow_f64) as u128);
 
     let variables = whale_votes_query::Variables {
         proposal: proposal_id.to_owned(),
@@ -535,18 +543,18 @@ async fn adjust_values_due_to_limit(
 fn adjust_values_due_to_limit_inner(
     votes: Vec<Option<whale_votes_query::WhaleVotesQueryVotes>>,
     vp_limit_decimal: f64,
-    pool: u128,
-    score: u128,
-    reward_limit: u128,
+    pool: U256,
+    score: U256,
+    reward_limit: U256,
     decimals: i32,
-) -> (u128, u128) {
-    let pow_f64 = 10f64.powi(decimals);
+) -> (U256, U256) {
+    let pow_f64 = 10f64.powi(decimals); // cache
     let extra_vp = (votes.iter().fold(0.0, |acc, vote| {
         acc + vote.as_ref().unwrap().vp.unwrap() - vp_limit_decimal
     }) * pow_f64) as u128;
 
-    let num_extra_vp = votes.len() as u128;
-    let vp_limit = (vp_limit_decimal * pow_f64) as u128;
+    let num_extra_vp = U256::from(votes.len());
+    let vp_limit = U256::from((vp_limit_decimal * pow_f64) as u128);
     let adjusted_score = score - vp_limit * num_extra_vp - extra_vp;
     let adjusted_pool = pool - (reward_limit * num_extra_vp);
 
@@ -558,24 +566,22 @@ mod test_compute_extra_vp {
     use std::vec;
 
     use super::adjust_values_due_to_limit_inner;
+    use super::compute_user_reward;
     use super::whale_votes_query::WhaleVotesQueryVotes;
+    use ethers::types::U256;
 
     #[test]
-    fn test_compute_extra_vp_1() {
-        let user1 = WhaleVotesQueryVotes {
-            vp: Some(91.0),
-            choice: 1,
-        };
+    fn test_compute_extra_vp_no_extra() {
         let decimals = 18_i32;
         let pow = 10f64.powi(decimals);
-        let votes = vec![Some(user1)];
+        let votes = vec![];
 
-        let score = (100.0 * pow) as u128;
-        let pool = (200.0 * pow) as u128;
-        let score_decimal = (score as f64) / pow;
-        let pool_decimal = (pool as f64) / pow;
-        let reward_limit = (110.0 * pow) as u128;
-        let reward_limit_decimal = reward_limit as f64 / pow;
+        let score_decimal = 100.0;
+        let score = U256::from((score_decimal * pow) as u128);
+        let pool_decimal = 200.0;
+        let pool = U256::from((pool_decimal * pow) as u128);
+        let reward_limit_decimal = 110.0;
+        let reward_limit = U256::from((reward_limit_decimal * pow) as u128);
         let vp_limit_decimal = reward_limit_decimal * score_decimal / pool_decimal;
 
         let (adjusted_score, adjusted_pool) = adjust_values_due_to_limit_inner(
@@ -586,22 +592,163 @@ mod test_compute_extra_vp {
             reward_limit,
             decimals,
         );
-        assert_eq!(adjusted_score, (9.0 * pow) as u128);
-        assert_eq!(adjusted_pool, (90.0 * pow) as u128);
+        assert_eq!(adjusted_score, score);
+        assert_eq!(adjusted_pool, pool);
     }
+
+    #[test]
+    fn test_compute_extra_vp_one_extra() {
+        let user1 = WhaleVotesQueryVotes {
+            vp: Some(91.0),
+            choice: 1,
+        };
+        let decimals = 18_i32;
+        let pow = 10f64.powi(decimals);
+        let votes = vec![Some(user1)];
+
+        let score_decimal = 100.0;
+        let score = U256::from((score_decimal * pow) as u128);
+        let pool_decimal = 200.0;
+        let pool = U256::from((pool_decimal * pow) as u128);
+        let reward_limit_decimal = 110.0;
+        let reward_limit = U256::from((reward_limit_decimal * pow) as u128);
+        let vp_limit_decimal = reward_limit_decimal * score_decimal / pool_decimal;
+
+        let (adjusted_score, adjusted_pool) = adjust_values_due_to_limit_inner(
+            votes,
+            vp_limit_decimal,
+            pool,
+            score,
+            reward_limit,
+            decimals,
+        );
+        assert_eq!(adjusted_score, U256::from((9.0 * pow) as u128));
+        assert_eq!(adjusted_pool, U256::from((90.0 * pow) as u128));
+    }
+
+    // #[test]
+    // fn test_compute_extra_vp_five_voters() {
+    //     // user1: 13 vp
+    //     // user2: 14 vp
+    //     // user3: 15 vp
+    //     // user4: 20 vp
+    //     // user5: 25 vp
+    //     //
+    //     // limit: 10
+    //     // pool: 200
+    //     //
+    //     // expected score: 100 - 87 => 13 vp
+    //     // expected pool: 200 - 50 => 150
+    //     let user1 = WhaleVotesQueryVotes {
+    //         vp: Some(13.0),
+    //         choice: 1,
+    //     };
+    //     let user2 = WhaleVotesQueryVotes {
+    //         vp: Some(14.0),
+    //         choice: 1,
+    //     };
+    //     let user3 = WhaleVotesQueryVotes {
+    //         vp: Some(15.0),
+    //         choice: 1,
+    //     };
+    //     let user4 = WhaleVotesQueryVotes {
+    //         vp: Some(20.0),
+    //         choice: 1,
+    //     };
+    //     let user5 = WhaleVotesQueryVotes {
+    //         vp: Some(25.0),
+    //         choice: 1,
+    //     };
+    //     let decimals = 18_i32;
+    //     let pow = 10f64.powi(decimals);
+    //     let votes = vec![Some(user1), Some(user2), Some(user3), Some(user4), Some(user5)];
+
+    //     let score = (100.0 * pow) as u128;
+    //     let pool = (200.0 * pow) as u128;
+    //     let score_decimal = (score as f64) / pow;
+    //     let pool_decimal = (pool as f64) / pow;
+    //     let reward_limit = (10.0 * pow) as u128;
+    //     let reward_limit_decimal = reward_limit as f64 / pow;
+    //     let vp_limit_decimal = reward_limit_decimal * score_decimal / pool_decimal;
+
+    //     let (adjusted_score, adjusted_pool) = adjust_values_due_to_limit_inner(
+    //         votes,
+    //         vp_limit_decimal,
+    //         pool,
+    //         score,
+    //         reward_limit,
+    //         decimals,
+    //     );
+    //     assert_eq!(adjusted_score, (13.0 * pow) as u128);
+    //     assert_eq!(adjusted_pool, (150.0 * pow) as u128);
+
+    //     let vp = (9.0 * pow) as u128;
+    //     let distribution = super::DistributionType::Weighted(Some(reward_limit));
+    //     let reward = compute_user_reward(adjusted_pool, vp, adjusted_score, distribution, 0);
+    //     assert_eq!(reward, (150.0 * pow) as u128);
+    // }
+
+    // #[test]
+    // fn test_compute_small_user() {
+    //     // user1: 90 vp
+    //     // user2: 9 vp
+    //     // user3: 1 vp
+    //     //
+    //     // limit: 40
+    //     // pool: 200
+    //     let user1 = WhaleVotesQueryVotes {
+    //         vp: Some(90.0),
+    //         choice: 1,
+    //     };
+    //     let user2 = WhaleVotesQueryVotes {
+    //         vp: Some(9.0),
+    //         choice: 1,
+    //     };
+    //     let user3 = WhaleVotesQueryVotes {
+    //         vp: Some(1.0),
+    //         choice: 1,
+    //     };
+    //     let decimals = 18_i32;
+    //     let pow = 10f64.powi(decimals);
+    //     let votes = vec![Some(user1), Some(user2), Some(user3)];
+
+    //     let score = (100.0 * pow) as u128;
+    //     let pool = (200.0 * pow) as u128;
+    //     let score_decimal = (score as f64) / pow;
+    //     let pool_decimal = (pool as f64) / pow;
+    //     let reward_limit = (40.0 * pow) as u128;
+    //     let reward_limit_decimal = reward_limit as f64 / pow;
+    //     let vp_limit_decimal = reward_limit_decimal * score_decimal / pool_decimal;
+
+    //     let (adjusted_score, adjusted_pool) = adjust_values_due_to_limit_inner(
+    //         votes,
+    //         vp_limit_decimal,
+    //         pool,
+    //         score,
+    //         reward_limit,
+    //         decimals,
+    //     );
+    //     assert_eq!(adjusted_score, (13.0 * pow) as u128);
+    //     assert_eq!(adjusted_pool, (150.0 * pow) as u128);
+
+    //     let vp = (9.0 * pow) as u128;
+    //     let distribution = super::DistributionType::Weighted(Some(reward_limit));
+    //     let reward = compute_user_reward(adjusted_pool, vp, adjusted_score, distribution, 0);
+    //     assert_eq!(reward, (150.0 * pow) as u128);
+    // }
 }
 
 fn compute_user_reward(
-    pool: u128,
-    voting_power: u128,
-    proposal_score: u128,
+    pool: U256,
+    voting_power: U256,
+    proposal_score: U256,
     cap: DistributionType,
     votes: u64,
-) -> u128 {
+) -> U256 {
     match cap {
-        DistributionType::Even => pool / (votes as u128),
+        DistributionType::Even => pool / (U256::from(votes)),
         DistributionType::Weighted(cap) => {
-            let reward = voting_power * pool / proposal_score;
+            let reward = (voting_power * pool) / proposal_score;
             if let Some(limit) = cap {
                 if reward > limit {
                     return limit;
@@ -616,147 +763,148 @@ fn compute_user_reward(
 #[cfg(test)]
 mod test_compute_user_reward {
     use super::{compute_user_reward, DistributionType};
+    use ethers::types::U256;
 
     #[test]
     fn full_vp_no_cap() {
-        let voting_power = 100;
-        let proposal_score = 100;
-        let pool_size = 100;
+        let voting_power = U256::from(100);
+        let proposal_score = U256::from(100);
+        let pool_size = U256::from(100);
         let votes = 1;
         let cap = DistributionType::Weighted(None);
 
         let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
-        assert_eq!(reward, 100);
+        assert_eq!(reward, U256::from(100));
     }
 
     #[test]
     fn full_vp_with_cap() {
-        let voting_power = 100;
-        let proposal_score = 100;
-        let pool_size = 100;
+        let voting_power = U256::from(100);
+        let proposal_score = U256::from(100);
+        let pool_size = U256::from(100);
         let votes = 1;
-        let cap = DistributionType::Weighted(Some(50));
+        let cap = DistributionType::Weighted(Some(U256::from(50)));
 
         let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
-        assert_eq!(reward, 50);
+        assert_eq!(reward, U256::from(50));
     }
 
     #[test]
     fn full_vp_with_cap_not_reached() {
-        let voting_power = 100;
-        let proposal_score = 100;
-        let pool_size = 100;
+        let voting_power = U256::from(100);
+        let proposal_score = U256::from(100);
+        let pool_size = U256::from(100);
         let votes = 1;
-        let cap = DistributionType::Weighted(Some(110));
+        let cap = DistributionType::Weighted(Some(U256::from(110)));
 
         let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
-        assert_eq!(reward, 100);
+        assert_eq!(reward, U256::from(100));
     }
 
     #[test]
     fn half_vp_no_cap() {
-        let voting_power = 50;
-        let proposal_score = 100;
-        let pool_size = 100;
+        let voting_power = U256::from(50);
+        let proposal_score = U256::from(100);
+        let pool_size = U256::from(100);
         let votes = 2;
         let cap = DistributionType::Weighted(None);
 
         let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
-        assert_eq!(reward, 50);
+        assert_eq!(reward, U256::from(50));
     }
 
     #[test]
     fn half_vp_with_cap() {
-        let voting_power = 50;
-        let proposal_score = 100;
-        let pool_size = 100;
+        let voting_power = U256::from(50);
+        let proposal_score = U256::from(100);
+        let pool_size = U256::from(100);
         let votes = 2;
-        let cap = DistributionType::Weighted(Some(25));
+        let cap = DistributionType::Weighted(Some(U256::from(25)));
 
         let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
-        assert_eq!(reward, 25);
+        assert_eq!(reward, U256::from(25));
     }
 
     #[test]
     fn half_vp_with_cap_not_reached() {
-        let voting_power = 50;
-        let proposal_score = 100;
-        let pool_size = 100;
+        let voting_power = U256::from(50);
+        let proposal_score = U256::from(100);
+        let pool_size = U256::from(100);
         let votes = 2;
-        let cap = DistributionType::Weighted(Some(75));
+        let cap = DistributionType::Weighted(Some(U256::from(75)));
 
         let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
-        assert_eq!(reward, 50);
+        assert_eq!(reward, U256::from(50));
     }
 
     #[test]
     fn third_vp_no_cap() {
-        let voting_power = 10;
-        let proposal_score = 30;
-        let pool_size = 100;
+        let voting_power = U256::from(10);
+        let proposal_score = U256::from(30);
+        let pool_size = U256::from(100);
         let votes = 3;
         let cap = DistributionType::Weighted(None);
 
         let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
-        assert_eq!(reward, 33);
+        assert_eq!(reward, U256::from(33));
     }
 
     #[test]
     fn third_vp_with_cap() {
-        let voting_power = 10;
-        let proposal_score = 30;
-        let pool_size = 100;
+        let voting_power = U256::from(10);
+        let proposal_score = U256::from(30);
+        let pool_size = U256::from(100);
         let votes = 3;
-        let cap = DistributionType::Weighted(Some(18));
+        let cap = DistributionType::Weighted(Some(U256::from(18)));
 
         let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
-        assert_eq!(reward, 18);
+        assert_eq!(reward, U256::from(18));
     }
 
     #[test]
     fn third_vp_with_cap_not_reached() {
-        let voting_power = 10;
-        let proposal_score = 30;
-        let pool_size = 100;
+        let voting_power = U256::from(10);
+        let proposal_score = U256::from(30);
+        let pool_size = U256::from(100);
         let votes = 3;
-        let cap = DistributionType::Weighted(Some(50));
+        let cap = DistributionType::Weighted(Some(U256::from(50)));
 
         let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
-        assert_eq!(reward, 33);
+        assert_eq!(reward, U256::from(33));
     }
 
     #[test]
     fn even_distribution_two() {
-        let voting_power = 100;
-        let proposal_score = 100;
-        let pool_size = 100;
+        let voting_power = U256::from(100);
+        let proposal_score = U256::from(100);
+        let pool_size = U256::from(100);
         let votes = 2;
         let cap = DistributionType::Even;
 
         let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
-        assert_eq!(reward, 50);
+        assert_eq!(reward, U256::from(50));
     }
 
     #[test]
     fn even_distribution_three() {
-        let voting_power = 10;
-        let proposal_score = 30;
-        let pool_size = 100;
+        let voting_power = U256::from(10);
+        let proposal_score = U256::from(30);
+        let pool_size = U256::from(100);
         let votes = 3;
         let cap = DistributionType::Even;
 
         let reward = compute_user_reward(pool_size, voting_power, proposal_score, cap, votes);
 
-        assert_eq!(reward, 33);
+        assert_eq!(reward, U256::from(33));
     }
 }
