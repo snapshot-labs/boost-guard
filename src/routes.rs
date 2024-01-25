@@ -1,3 +1,4 @@
+use self::boost_query::BoostQueryBoostStrategyDistribution;
 use crate::routes::boost_query::BoostQueryBoostStrategy;
 use crate::routes::boost_query::BoostQueryBoostStrategyEligibility;
 use crate::signatures::ClaimConfig;
@@ -6,6 +7,8 @@ use crate::{ServerError, HUB_URL, SUBGRAPH_URL};
 use ::axum::extract::Json;
 use axum::response::IntoResponse;
 use axum::Extension;
+use cached::proc_macro::cached;
+use cached::SizedCache;
 use ethers::types::Address;
 use ethers::types::U256;
 use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
@@ -14,8 +17,6 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::SystemTime;
-
-use self::boost_query::BoostQueryBoostStrategyDistribution;
 
 pub async fn handle_create_vouchers(
     Extension(state): Extension<State>,
@@ -481,7 +482,14 @@ async fn get_user_reward(
     }
 }
 
-// todo: cache on boost info
+// LRU cache that uses `boost_id` and `chain_id` as keys
+#[cached(
+    result = true,
+    sync_writes = true,
+    type = "SizedCache<String, HashMap<Address, U256>>",
+    create = "{ SizedCache::with_size(100) }",
+    convert = r#"{ format!("{}{}", boost_info.id, boost_info.chain_id) }"#
+)]
 async fn cached_rewards(
     client: &reqwest::Client,
     boost_info: &BoostInfo,

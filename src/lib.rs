@@ -26,7 +26,7 @@ lazy_static! {
         .expect("Please add VERIFYING_CONTRACT to your environment or .env file");
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ServerError {
     ErrorString(String),
 }
