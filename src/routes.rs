@@ -118,7 +118,7 @@ struct BoostQuery;
 )]
 struct ProposalQuery;
 
-type Any = u8;
+type Any = u16;
 #[derive(GraphQLQuery)]
 #[graphql(
     schema_path = "src/graphql/hub_schema.graphql",
@@ -226,7 +226,7 @@ pub struct BoostParams {
 pub enum BoostEligibility {
     #[default]
     Incentive, // Everyone who votes is eligible, regardless of choice
-    Bribe(u8), // Only those who voted for the specific choice are eligible
+    Bribe(u16), // Only those who voted for the specific choice are eligible
 }
 
 impl TryFrom<BoostQueryBoostStrategyEligibility> for BoostEligibility {
@@ -285,7 +285,7 @@ impl TryFrom<boost_query::BoostQueryBoostStrategyDistribution> for DistributionT
 struct VoteInfo {
     voter: Address,
     voting_power: f64,
-    choice: u8,
+    choice: u16,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -598,7 +598,7 @@ fn validate_type(type_: &str) -> Result<(), ServerError> {
     }
 }
 
-fn validate_choice(choice: u8, boost_eligibility: BoostEligibility) -> Result<(), ServerError> {
+fn validate_choice(choice: u16, boost_eligibility: BoostEligibility) -> Result<(), ServerError> {
     match boost_eligibility {
         BoostEligibility::Incentive => Ok(()),
         BoostEligibility::Bribe(boosted_choice) => {
