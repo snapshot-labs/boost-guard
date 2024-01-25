@@ -8,6 +8,7 @@ query ProposalQuery($id: String!) {
     start
     end
     snapshot
+    scores
     scores_total
     votes
   }
