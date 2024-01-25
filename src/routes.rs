@@ -311,7 +311,7 @@ struct ProposalInfo {
 impl ProposalInfo {
     fn get_score(&self, eligibility: BoostEligibility) -> f64 {
         if let Some(choice) = eligibility.boosted_choice() {
-            self.scores_by_choice[choice]
+            self.scores_by_choice[choice - 1]
         } else {
             self.score
         }
