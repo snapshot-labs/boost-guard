@@ -118,7 +118,7 @@ struct BoostQuery;
 )]
 struct ProposalQuery;
 
-type Any = u16;
+type Any = usize;
 #[derive(GraphQLQuery)]
 #[graphql(
     schema_path = "src/graphql/hub_schema.graphql",
@@ -226,7 +226,17 @@ pub struct BoostParams {
 pub enum BoostEligibility {
     #[default]
     Incentive, // Everyone who votes is eligible, regardless of choice
-    Bribe(u16), // Only those who voted for the specific choice are eligible
+    Bribe(usize), // Only those who voted for the specific choice are eligible
+}
+
+impl BoostEligibility {
+    fn boosted_choice(&self) -> Option<usize> {
+        if let BoostEligibility::Bribe(choice) = self {
+            Some(*choice)
+        } else {
+            None
+        }
+    }
 }
 
 impl TryFrom<BoostQueryBoostStrategyEligibility> for BoostEligibility {
@@ -285,7 +295,7 @@ impl TryFrom<boost_query::BoostQueryBoostStrategyDistribution> for DistributionT
 struct VoteInfo {
     voter: Address,
     voting_power: f64,
-    choice: u16,
+    choice: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -293,8 +303,19 @@ struct ProposalInfo {
     id: String,
     type_: String,
     score: f64,
+    scores_by_choice: Vec<f64>,
     end: u64,
-    votes: u64,
+    num_votes: u64,
+}
+
+impl ProposalInfo {
+    fn get_score(&self, eligibility: BoostEligibility) -> f64 {
+        if let Some(choice) = eligibility.boosted_choice() {
+            self.scores_by_choice[choice]
+        } else {
+            self.score
+        }
+    }
 }
 
 impl TryFrom<proposal_query::ProposalQueryProposal> for ProposalInfo {
@@ -302,12 +323,18 @@ impl TryFrom<proposal_query::ProposalQueryProposal> for ProposalInfo {
 
     fn try_from(proposal: proposal_query::ProposalQueryProposal) -> Result<Self, Self::Error> {
         let id = proposal.id;
-        let proposal_type = proposal.type_.ok_or("missing proposal type from the hub")?;
-        let proposal_score = proposal
+        let type_ = proposal.type_.ok_or("missing proposal type from the hub")?;
+        let scores_by_choice = proposal
+            .scores
+            .ok_or("missing proposal scores from the hub")?
+            .into_iter()
+            .map(|choice| choice.ok_or("missing choice in scores by choices"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let score = proposal
             .scores_total
-            .ok_or("missing proposal score from the hub")?;
-        let proposal_end = proposal.end.try_into()?;
-        let votes = proposal
+            .ok_or("missing proposal scores_total from the hub")?;
+        let end = proposal.end.try_into()?;
+        let num_votes = proposal
             .votes
             .ok_or("missing votes from the hub")?
             .try_into()
@@ -315,10 +342,11 @@ impl TryFrom<proposal_query::ProposalQueryProposal> for ProposalInfo {
 
         Ok(ProposalInfo {
             id,
-            type_: proposal_type,
-            score: proposal_score,
-            end: proposal_end,
-            votes,
+            type_,
+            score,
+            scores_by_choice,
+            end,
+            num_votes,
         })
     }
 }
@@ -459,7 +487,20 @@ async fn get_user_reward(
     vote_info: &VoteInfo,
 ) -> Result<U256, ServerError> {
     match boost_info.params.distribution {
-        DistributionType::Even => Ok(boost_info.pool_size / (U256::from(proposal_info.votes))),
+        DistributionType::Even => {
+            if let Some(boosted_choice) = boost_info.params.eligibility.boosted_choice() {
+                // Only count the number of votes that voted for the boosted choice
+                let num_votes = cached_num_votes(
+                    client.expect("client should be here"),
+                    boost_info,
+                    proposal_info,
+                    boosted_choice,
+                );
+                Ok(boost_info.pool_size / num_votes.await?)
+            } else {
+                Ok(boost_info.pool_size / (U256::from(proposal_info.num_votes)))}
+            }
+        , // todo: votes
         DistributionType::Weighted(l) => {
             if let Some(limit) = l {
                 let rewards = cached_rewards(
@@ -474,12 +515,53 @@ async fn get_user_reward(
                     .expect("voter should appear in hashmap"))
             } else {
                 let pow = 10f64.powi(boost_info.decimals as i32); // todo: cache
-                let score = U256::from((proposal_info.score * pow) as u128);
+                let score = U256::from(
+                    (proposal_info.get_score(boost_info.params.eligibility) * pow) as u128,
+                );
                 let voting_power = U256::from((vote_info.voting_power * pow) as u128);
                 Ok((voting_power * boost_info.pool_size) / score)
             }
         }
     }
+}
+
+// LRU cache that uses `boost_id` and `chain_id` as keys
+#[cached(
+    result = true,
+    sync_writes = true,
+    type = "SizedCache<String, U256>",
+    create = "{ SizedCache::with_size(500) }",
+    convert = r#"{ format!("{}{}", _boost_info.id, _boost_info.chain_id) }"#
+)]
+async fn cached_num_votes(
+    client: &reqwest::Client,
+    _boost_info: &BoostInfo,
+    proposal_info: &ProposalInfo,
+    boosted_choice: usize,
+) -> Result<U256, ServerError> {
+    let variables = every_vote_query::Variables {
+        proposal: proposal_info.id.to_owned(),
+    };
+    let request_body = EveryVoteQuery::build_query(variables);
+    let query_results: every_vote_query::ResponseData = client
+        .post(HUB_URL.as_str())
+        .json(&request_body)
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    let num_votes = query_results
+        .votes
+        .ok_or("missing votes from the hub")?
+        .into_iter()
+        .map(|v| v.ok_or("missing vote info from the hub"))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|v| v.choice == boosted_choice)
+        .count();
+
+    Ok(U256::from(num_votes))
 }
 
 // LRU cache that uses `boost_id` and `chain_id` as keys
@@ -508,7 +590,7 @@ async fn cached_rewards(
         .json()
         .await?;
 
-    let votes: Vec<VoteInfo> = query_results
+    let mut votes: Vec<VoteInfo> = query_results
         .votes
         .ok_or("missing votes from the hub")?
         .into_iter()
@@ -529,11 +611,19 @@ async fn cached_rewards(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    // Filter by choice
+    if let BoostEligibility::Bribe(choice) = boost_info.params.eligibility {
+        votes = votes
+            .into_iter()
+            .filter(|v| v.choice == choice)
+            .collect::<Vec<_>>();
+    }
+
     compute_rewards(
         votes,
         boost_info.pool_size,
         boost_info.decimals,
-        proposal_info.score,
+        proposal_info.get_score(boost_info.params.eligibility),
         limit,
     )
 }
@@ -598,7 +688,7 @@ fn validate_type(type_: &str) -> Result<(), ServerError> {
     }
 }
 
-fn validate_choice(choice: u16, boost_eligibility: BoostEligibility) -> Result<(), ServerError> {
+fn validate_choice(choice: usize, boost_eligibility: BoostEligibility) -> Result<(), ServerError> {
     match boost_eligibility {
         BoostEligibility::Incentive => Ok(()),
         BoostEligibility::Bribe(boosted_choice) => {
@@ -816,7 +906,7 @@ mod test_compute_user_reward {
         let voting_power = 10.0;
         let proposal_score = U256::from(100);
         let pool_size = U256::from(100);
-        let votes = 1;
+        let num_votes = 1;
         let boost_info: BoostInfo = BoostInfo {
             pool_size,
             params: BoostParams {
@@ -827,7 +917,7 @@ mod test_compute_user_reward {
         };
         let proposal_info = ProposalInfo {
             score: proposal_score.as_u128() as f64,
-            votes,
+            num_votes,
             ..Default::default()
         };
         let vote_info = VoteInfo {
@@ -846,7 +936,7 @@ mod test_compute_user_reward {
     async fn even_distribution_two_voters() {
         let proposal_score = U256::from(100);
         let pool_size = U256::from(100);
-        let votes = 2;
+        let num_votes = 2;
         let boost_info: BoostInfo = BoostInfo {
             pool_size,
             params: BoostParams {
@@ -857,7 +947,7 @@ mod test_compute_user_reward {
         };
         let proposal_info = ProposalInfo {
             score: proposal_score.as_u128() as f64,
-            votes,
+            num_votes,
             ..Default::default()
         };
 
@@ -888,7 +978,7 @@ mod test_compute_user_reward {
     async fn even_distribution_three_voters() {
         let proposal_score = U256::from(100);
         let pool_size = U256::from(100);
-        let votes = 3;
+        let num_votes = 3;
         let boost_info: BoostInfo = BoostInfo {
             pool_size,
             params: BoostParams {
@@ -899,7 +989,7 @@ mod test_compute_user_reward {
         };
         let proposal_info = ProposalInfo {
             score: proposal_score.as_u128() as f64,
-            votes,
+            num_votes,
             ..Default::default()
         };
 
@@ -939,7 +1029,7 @@ mod test_compute_user_reward {
     async fn weighted_distribution_three_voters() {
         let proposal_score = U256::from(100);
         let pool_size = U256::from(100);
-        let votes = 3;
+        let num_votes = 3;
         let boost_info: BoostInfo = BoostInfo {
             pool_size,
             params: BoostParams {
@@ -950,7 +1040,7 @@ mod test_compute_user_reward {
         };
         let proposal_info = ProposalInfo {
             score: proposal_score.as_u128() as f64,
-            votes,
+            num_votes,
             ..Default::default()
         };
 
