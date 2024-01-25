@@ -1,0 +1,11 @@
+query EveryVoteQuery($proposal: String!) {
+    votes (
+    orderBy: "vp"
+    orderDirection:desc
+    where: {proposal: $proposal}
+  ) {
+    voter
+    vp
+    choice
+  }
+}

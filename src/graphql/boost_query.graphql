@@ -2,6 +2,8 @@ query BoostQuery($id: String!) {
   boost(
     id: $id
   ) {
+    id
+    chainId
     guard
     poolSize
     token {

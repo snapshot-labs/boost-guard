@@ -2,6 +2,7 @@ query ProposalQuery($id: String!) {
   proposal(
     id: $id
   ) {
+    id
     type
     choices
     start
