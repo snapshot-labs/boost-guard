@@ -514,7 +514,7 @@ async fn get_user_reward(
                     .get(&vote_info.voter)
                     .expect("voter should appear in hashmap"))
             } else {
-                let pow = 10f64.powi(boost_info.decimals as i32); // todo: cache
+                let pow = cached_pow(boost_info.decimals);
                 let score = U256::from(
                     (proposal_info.get_score(boost_info.params.eligibility) * pow) as u128,
                 );
@@ -562,6 +562,11 @@ async fn cached_num_votes(
         .count();
 
     Ok(U256::from(num_votes))
+}
+
+#[cached]
+fn cached_pow(decimals: u8) -> f64 {
+    10f64.powi(decimals as i32)
 }
 
 // LRU cache that uses `boost_id` and `chain_id` as keys
@@ -635,7 +640,7 @@ fn compute_rewards(
     score_decimal: f64,
     limit: U256,
 ) -> Result<HashMap<Address, U256>, ServerError> {
-    let pow = 10f64.powi(decimals as i32);
+    let pow = cached_pow(decimals);
     let mut score = U256::from((score_decimal * pow) as u128);
 
     // Ensure the vector is sorted
