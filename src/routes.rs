@@ -191,10 +191,11 @@ impl TryFrom<boost_query::BoostQueryBoost> for BoostInfo {
                     distribution,
                 };
 
-                let pool_size = value
+                let pool_size_u128: u128 = value
                     .pool_size
                     .parse()
                     .map_err(|_| "failed to parse pool size")?;
+                let pool_size = U256::from(pool_size_u128);
                 let decimals = value
                     .token
                     .decimals
