@@ -250,7 +250,7 @@ impl TryFrom<BoostQueryBoostStrategyEligibility> for BoostEligibility {
                 let choice = value
                     .choice
                     .ok_or("missing choice")?
-                    .try_into()
+                    .parse()
                     .map_err(|_| "failed to parse choice")?;
                 Ok(BoostEligibility::Bribe(choice))
             }
