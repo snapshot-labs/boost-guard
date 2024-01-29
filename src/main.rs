@@ -87,7 +87,7 @@ mod tests {
             proposal_id: "0x907c2d9f6030f6dc8d5d47a946f5bb06b05518c16bc1849a857c3cfea9d18e35"
                 .to_string(),
             voter_address: "0x3901D0fDe202aF1427216b79f5243f8A022d68cf".to_string(),
-            boosts: vec![("3".to_string(), "11155111".to_string())],
+            boosts: vec![("2".to_string(), "11155111".to_string())],
         };
 
         let response = app

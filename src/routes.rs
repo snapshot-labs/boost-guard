@@ -157,7 +157,7 @@ impl TryFrom<&str> for BoostStrategy {
 #[derive(Debug, Default)]
 pub struct BoostInfo {
     pub id: u64,
-    pub chain_id: u128,
+    pub chain_id: U256,
     pub strategy: BoostStrategy,
     pub params: BoostParams,
     pub pool_size: U256,
@@ -169,10 +169,8 @@ impl TryFrom<boost_query::BoostQueryBoost> for BoostInfo {
 
     fn try_from(value: boost_query::BoostQueryBoost) -> Result<Self, Self::Error> {
         let id = value.id.parse().map_err(|_| "failed to parse id")?;
-        let chain_id = value
-            .chain_id
-            .parse()
-            .map_err(|_| "failed to parse chain id")?;
+        let chain_id =
+            U256::from_dec_str(&value.chain_id).map_err(|_| "failed to parse chain id")?;
         let strategy: BoostQueryBoostStrategy =
             value.strategy.ok_or("strategy missing from query")?;
         let name = strategy.name.as_str();
@@ -191,11 +189,8 @@ impl TryFrom<boost_query::BoostQueryBoost> for BoostInfo {
                     distribution,
                 };
 
-                let pool_size_u128: u128 = value
-                    .pool_size
-                    .parse()
+                let pool_size = U256::from_dec_str(&value.pool_size)
                     .map_err(|_| "failed to parse pool size")?;
-                let pool_size = U256::from(pool_size_u128);
                 let decimals = value
                     .token
                     .decimals
@@ -278,7 +273,7 @@ impl TryFrom<boost_query::BoostQueryBoostStrategyDistribution> for DistributionT
         match value.type_.as_str() {
             "weighted" => {
                 if let Some(limit) = value.limit {
-                    match U256::from_str(&limit) {
+                    match U256::from_dec_str(&limit) {
                         Ok(limit) => Ok(DistributionType::Weighted(Some(limit))),
                         Err(_) => Err("failed to parse limit"),
                     }
@@ -656,7 +651,7 @@ async fn cached_rewards(
 }
 
 fn compute_rewards(
-    query_results: Vec<VoteInfo>,
+    votes: Vec<VoteInfo>,
     mut pool: U256,
     decimals: u8,
     score_decimal: f64,
@@ -666,14 +661,17 @@ fn compute_rewards(
     let mut score = U256::from((score_decimal * pow) as u128);
 
     // Ensure the vector is sorted
-    if query_results
+    if votes
         .windows(2)
         .any(|w| w[0].voting_power < w[1].voting_power)
     {
         return Err(ServerError::ErrorString("votes are not sorted".to_string()));
     }
 
-    Ok(query_results
+    println!("Votes: , {:?}", votes);
+    println!("pool: {:?}, score: {:?}", pool, score);
+    println!("limit: {limit:?}");
+    Ok(votes
         .into_iter()
         .map(|vote_info| {
             let vp = U256::from((vote_info.voting_power * pow) as u128);
