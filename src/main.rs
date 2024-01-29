@@ -52,10 +52,10 @@ mod tests {
     async fn test_create_vouchers() {
         let app = super::app();
         let query = QueryParams {
-            proposal_id: "0x07c716ac9593b273b81e54534def6e5a9bfebb6ba32f5f378a73ad5822487f9d"
+            proposal_id: "0x907c2d9f6030f6dc8d5d47a946f5bb06b05518c16bc1849a857c3cfea9d18e35"
                 .to_string(),
-            voter_address: "0xc83A9e69012312513328992d454290be85e95101".to_string(),
-            boosts: vec![("35".to_string(), "11155111".to_string())],
+            voter_address: "0x3901D0fDe202aF1427216b79f5243f8A022d68cf".to_string(),
+            boosts: vec![("2".to_string(), "11155111".to_string())],
         };
 
         let response = app
@@ -84,10 +84,10 @@ mod tests {
     async fn test_get_rewards() {
         let app = super::app();
         let query = QueryParams {
-            proposal_id: "0x0b587573f29e377e205bbf255dcd178747cf1a505c7a275fc370ebb6a253ff14"
+            proposal_id: "0x907c2d9f6030f6dc8d5d47a946f5bb06b05518c16bc1849a857c3cfea9d18e35"
                 .to_string(),
-            voter_address: "0xc83A9e69012312513328992d454290be85e95101".to_string(),
-            boosts: vec![("114".to_string(), "11155111".to_string())],
+            voter_address: "0x3901D0fDe202aF1427216b79f5243f8A022d68cf".to_string(),
+            boosts: vec![("3".to_string(), "11155111".to_string())],
         };
 
         let response = app

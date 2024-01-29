@@ -337,7 +337,7 @@ impl TryFrom<proposal_query::ProposalQueryProposal> for ProposalInfo {
         let end = proposal.end.try_into()?;
         let num_votes = proposal
             .votes
-            .ok_or("missing votes from the hub")?
+            .ok_or("proposal: missing votes from the hub")?
             .try_into()
             .map_err(|_| ServerError::ErrorString("failed to parse votes".to_string()))?;
 
@@ -371,21 +371,38 @@ async fn get_rewards_inner(
 
     let mut response = Vec::with_capacity(request.boosts.len());
     for (boost_id, chain_id) in request.boosts {
-        let Ok(boost_info) = get_boost_info(&state.client, &boost_id).await else {
-            continue;
+        let boost_info = match get_boost_info(&state.client, &boost_id).await {
+            Ok(boost_info) => boost_info,
+            Err(e) => {
+                eprintln!("{:?}", e);
+                continue;
+            }
         };
 
         // Ensure the requested proposal id actually corresponds to the boosted proposal
         if boost_info.params.proposal != request.proposal_id {
+            eprintln!("proposal id mismatch");
             continue;
         }
 
-        if validate_choice(vote_info.choice, boost_info.params.eligibility).is_err() {
-            continue;
+        match validate_choice(vote_info.choice, boost_info.params.eligibility) {
+            Ok(_) => (),
+            Err(e) => {
+                eprintln!("{:?}", e);
+                continue;
+            }
         }
 
         let reward =
-            get_user_reward(Some(&state.client), &boost_info, &proposal_info, &vote_info).await?;
+            match get_user_reward(Some(&state.client), &boost_info, &proposal_info, &vote_info)
+                .await
+            {
+                Ok(reward) => reward,
+                Err(e) => {
+                    eprintln!("{:?}", e);
+                    continue;
+                }
+            };
 
         response.push(RewardInfo {
             voter_address: request.voter_address.clone(),
@@ -450,8 +467,8 @@ async fn get_vote_info(
     proposal_id: &str,
 ) -> Result<VoteInfo, ServerError> {
     let variables = votes_query::Variables {
-        voter: voter_address.to_owned(),
-        proposal: proposal_id.to_owned(),
+        voter: voter_address.to_string(),
+        proposal: proposal_id.to_string(),
     };
 
     let request_body = VotesQuery::build_query(variables);
@@ -466,7 +483,7 @@ async fn get_vote_info(
         .data
         .ok_or("missing data from the hub")?
         .votes
-        .ok_or("missing votes from the hub")?;
+        .ok_or("votes query: missing votes from the hub")?;
 
     let vote = votes
         .into_iter()
@@ -544,7 +561,7 @@ async fn cached_num_votes(
         proposal: proposal_info.id.to_owned(),
     };
     let request_body = EveryVoteQuery::build_query(variables);
-    let query_results: every_vote_query::ResponseData = client
+    let query_results: GraphQLResponse<every_vote_query::ResponseData> = client
         .post(HUB_URL.as_str())
         .json(&request_body)
         .send()
@@ -553,8 +570,10 @@ async fn cached_num_votes(
         .await?;
 
     let num_votes = query_results
+        .data
+        .ok_or("num_votes: missing data from the hub")?
         .votes
-        .ok_or("missing votes from the hub")?
+        .ok_or("num_votes: missing votes from the hub")?
         .into_iter()
         .map(|v| v.ok_or("missing vote info from the hub"))
         .collect::<Result<Vec<_>, _>>()?
@@ -588,7 +607,7 @@ async fn cached_rewards(
         proposal: proposal_info.id.to_owned(),
     };
     let request_body = EveryVoteQuery::build_query(variables);
-    let query_results: every_vote_query::ResponseData = client
+    let query_results: GraphQLResponse<every_vote_query::ResponseData> = client
         .post(HUB_URL.as_str())
         .json(&request_body)
         .send()
@@ -597,8 +616,10 @@ async fn cached_rewards(
         .await?;
 
     let mut votes: Vec<VoteInfo> = query_results
+        .data
+        .ok_or("rewards: missing data from the hub")?
         .votes
-        .ok_or("missing votes from the hub")?
+        .ok_or("rewards: missing votes from the hub")?
         .into_iter()
         .map(|v| {
             if let Some(vote_info) = v {
