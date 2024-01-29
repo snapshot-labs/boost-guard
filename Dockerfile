@@ -25,6 +25,6 @@ ENV HUB_URL "https://testnet.hub.snapshot.org/graphql"
 ENV SUBGRAPH_URL "https://api.thegraph.com/subgraphs/name/snapshot-labs/boost-sepolia"
 ENV BOOST_NAME "boost"
 ENV BOOST_VERSION "1"
-ENV VERIFYING_CONTRACT "0x3a18420C0646CC8e6D46E43d792335AeCB657fd0"
+ENV VERIFYING_CONTRACT "0x2062f5330fF35F601f3c9C926ed01697bdF70f20"
 
 ENTRYPOINT ["/usr/local/bin/boost-guard"]
