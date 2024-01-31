@@ -1,6 +1,7 @@
 use axum::response::{IntoResponse, Response};
 use hyper::http::StatusCode;
 
+pub mod lottery;
 pub mod routes;
 pub mod signatures;
 

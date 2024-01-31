@@ -1,4 +1,5 @@
 use self::boost_query::BoostQueryBoostStrategyDistribution;
+use crate::lottery::cached_lottery_winners;
 use crate::routes::boost_query::BoostQueryBoostStrategy;
 use crate::routes::boost_query::BoostQueryBoostStrategyEligibility;
 use crate::signatures::ClaimConfig;
@@ -8,7 +9,8 @@ use ::axum::extract::Json;
 use axum::response::IntoResponse;
 use axum::Extension;
 use cached::proc_macro::cached;
-use cached::SizedCache;
+use cached::{SizedCache, TimedSizedCache};
+use durations::WEEK;
 use ethers::types::Address;
 use ethers::types::U256;
 use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
@@ -51,7 +53,7 @@ pub async fn handle_get_rewards(
         .await?
         .into_iter()
         .map(GetRewardsResponse::from)
-        .collect::<Vec<_>>(); // todo
+        .collect::<Vec<_>>();
 
     Ok(Json(response))
 }
@@ -133,7 +135,7 @@ struct VotesQuery;
     query_path = "src/graphql/every_vote_query.graphql",
     response_derives = "Debug"
 )]
-struct EveryVoteQuery;
+pub struct EveryVoteQuery;
 
 // List of different types of strategies supported
 #[derive(Debug, Default)]
@@ -226,7 +228,7 @@ pub enum BoostEligibility {
 }
 
 impl BoostEligibility {
-    fn boosted_choice(&self) -> Option<usize> {
+    pub fn boosted_choice(&self) -> Option<usize> {
         if let BoostEligibility::Bribe(choice) = self {
             Some(*choice)
         } else {
@@ -247,6 +249,9 @@ impl TryFrom<BoostQueryBoostStrategyEligibility> for BoostEligibility {
                     .ok_or("missing choice")?
                     .parse()
                     .map_err(|_| "failed to parse choice")?;
+                if choice == 0 {
+                    return Err("invalid choice: 0");
+                }
                 Ok(BoostEligibility::Bribe(choice))
             }
             _ => Err("invalid eligibility"),
@@ -256,9 +261,9 @@ impl TryFrom<BoostQueryBoostStrategyEligibility> for BoostEligibility {
 
 #[derive(Debug, Clone)]
 pub enum DistributionType {
-    Weighted(Option<U256>), // The option represents the maximum amount of tokens that can be rewarded.
+    Weighted(Option<U256>), // The option represents the maximum amount of tokens that can be rewarded. If None, there is no limit.
     Even,
-    Lottery(u32),
+    Lottery(u32), // The number of winners
 }
 
 impl Default for DistributionType {
@@ -284,30 +289,43 @@ impl TryFrom<boost_query::BoostQueryBoostStrategyDistribution> for DistributionT
             }
             "even" => Ok(DistributionType::Even),
             "lottery" => {
-                let num_winners = value.num_winners.ok_or("missing num winners")?;
-
-                todo!()
-            },
+                let num_winners = value
+                    .num_winners
+                    .ok_or("missing num winners")?
+                    .parse()
+                    .map_err(|_| "failed to parse num winners")?;
+                Ok(DistributionType::Lottery(num_winners))
+            }
             _ => Err("invalid distribution"),
         }
     }
 }
 
-#[derive(Debug, Clone, Default)]
-struct VoteInfo {
-    voter: Address,
-    voting_power: f64,
-    choice: usize,
+#[derive(Debug, Clone)]
+pub struct VoteInfo {
+    pub voter: Address,
+    pub voting_power: f64,
+    pub choice: usize,
+}
+
+impl Default for VoteInfo {
+    fn default() -> Self {
+        Self {
+            voter: Address::random(),
+            voting_power: 1.0,
+            choice: 1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
-struct ProposalInfo {
-    id: String,
-    type_: String,
-    score: f64,
-    scores_by_choice: Vec<f64>,
-    end: u64,
-    num_votes: u64,
+pub struct ProposalInfo {
+    pub id: String,
+    pub type_: String,
+    pub score: f64,
+    pub scores_by_choice: Vec<f64>,
+    pub end: u64,
+    pub num_votes: u64,
 }
 
 impl ProposalInfo {
@@ -541,8 +559,9 @@ async fn get_user_reward(
                 Ok((voting_power * boost_info.pool_size) / score)
             }
         }
-        DistributionType::Lottery(_prizes) => {
-            todo!("compute");
+        DistributionType::Lottery(num_winners) => {
+            let winners = cached_lottery_winners(client, boost_info, proposal_info, *num_winners).await?;
+            Ok(*winners.get(&vote_info.voter).ok_or("voter did not win this time!")?)
         }
     }
 }
@@ -551,8 +570,8 @@ async fn get_user_reward(
 #[cached(
     result = true,
     sync_writes = true,
-    type = "SizedCache<String, U256>",
-    create = "{ SizedCache::with_size(500) }",
+    type = "TimedSizedCache<String, U256>",
+    create = "{ TimedSizedCache::with_size_and_lifespan(500, 3 * WEEK.as_secs()) }",
     convert = r#"{ format!("{}{}", _boost_info.id, _boost_info.chain_id) }"#
 )]
 async fn cached_num_votes(
@@ -588,7 +607,11 @@ async fn cached_num_votes(
     Ok(U256::from(num_votes))
 }
 
-#[cached]
+#[cached(
+    sync_writes = true,
+    type = "SizedCache<u8, f64>",
+    create = "{ SizedCache::with_size(18) }"
+)]
 fn cached_pow(decimals: u8) -> f64 {
     10f64.powi(decimals as i32)
 }
@@ -597,8 +620,8 @@ fn cached_pow(decimals: u8) -> f64 {
 #[cached(
     result = true,
     sync_writes = true,
-    type = "SizedCache<String, HashMap<Address, U256>>",
-    create = "{ SizedCache::with_size(100) }",
+    type = "TimedSizedCache<String, HashMap<Address, U256>>",
+    create = "{ TimedSizedCache::with_size_and_lifespan(100, 3 * WEEK.as_secs()) }",
     convert = r#"{ format!("{}{}", boost_info.id, boost_info.chain_id) }"#
 )]
 async fn cached_rewards(
