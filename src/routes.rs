@@ -9,6 +9,7 @@ use ::axum::extract::Json;
 use axum::response::IntoResponse;
 use axum::Extension;
 use cached::proc_macro::cached;
+use cached::Cached;
 use cached::{SizedCache, TimedSizedCache};
 use durations::WEEK;
 use ethers::types::Address;
@@ -378,15 +379,23 @@ async fn get_rewards_inner(
 ) -> Result<Vec<RewardInfo>, ServerError> {
     let request: QueryParams = serde_json::from_value(p)?;
 
-    // TODO: We could cache the result (only if valid)
     let proposal_info: ProposalInfo =
         get_proposal_info(&state.client, &request.proposal_id).await?;
-    // TODO: We could cache the result (only if valid)
+
+    if let Err(e) = validate_proposal_info(&proposal_info) {
+        if let ServerError::ProposalStillInProgress = e {
+            // Proposal is still in progress, so we should remove the proposal from the cache.
+            let mut cache = GET_PROPOSAL_INFO.lock().await;
+            cache.cache_remove(request.proposal_id.as_str());
+            return Err(e);
+        } else {
+            // Proposal is invalid for a reason that will not change with other queries. Just return the error.
+            return Err(e);
+        }
+    }
+
     let vote_info =
         get_vote_info(&state.client, &request.voter_address, &request.proposal_id).await?;
-
-    validate_end_time(proposal_info.end)?;
-    validate_type(&proposal_info.type_)?;
 
     let mut response = Vec::with_capacity(request.boosts.len());
     for (boost_id, chain_id) in request.boosts {
@@ -434,6 +443,13 @@ async fn get_rewards_inner(
     Ok(response)
 }
 
+#[cached(
+    result = true,
+    sync_writes = true,
+    type = "TimedSizedCache<String, ProposalInfo>",
+    create = "{ TimedSizedCache::with_size_and_lifespan(100, 3 * WEEK.as_secs()) }",
+    convert = r#"{ proposal_id.to_string() }"#
+)]
 async fn get_proposal_info(
     client: &reqwest::Client,
     proposal_id: &str,
@@ -480,6 +496,13 @@ async fn get_boost_info(
     Ok(BoostInfo::try_from(boost)?)
 }
 
+#[cached(
+    result = true,
+    sync_writes = true,
+    type = "TimedSizedCache<String, VoteInfo>",
+    create = "{ TimedSizedCache::with_size_and_lifespan(2000, 3 * WEEK.as_secs()) }",
+    convert = r#"{ format!("{}{}", voter_address, proposal_id) }"#
+)]
 async fn get_vote_info(
     client: &reqwest::Client,
     voter_address: &str,
@@ -718,6 +741,12 @@ fn compute_rewards(
         .collect())
 }
 
+fn validate_proposal_info(proposal_info: &ProposalInfo) -> Result<(), ServerError> {
+    validate_end_time(proposal_info.end)?;
+    validate_type(&proposal_info.type_)?;
+    Ok(())
+}
+
 // We don't need to validate start_time because the smart-contract will do it anyway.
 fn validate_end_time(end: u64) -> Result<(), ServerError> {
     let current_timestamp = SystemTime::now()
@@ -725,9 +754,7 @@ fn validate_end_time(end: u64) -> Result<(), ServerError> {
         .unwrap() // Safe to unwrap because we are sure that the current time is after the UNIX_EPOCH
         .as_secs();
     if current_timestamp < end {
-        Err(ServerError::ErrorString(format!(
-            "proposal has not ended yet: {end:} > {current_timestamp:}",
-        )))
+        Err(ServerError::ProposalStillInProgress)
     } else {
         Ok(())
     }
