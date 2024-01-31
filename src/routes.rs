@@ -254,10 +254,11 @@ impl TryFrom<BoostQueryBoostStrategyEligibility> for BoostEligibility {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum DistributionType {
     Weighted(Option<U256>), // The option represents the maximum amount of tokens that can be rewarded.
     Even,
+    Lottery(u32),
 }
 
 impl Default for DistributionType {
@@ -282,6 +283,11 @@ impl TryFrom<boost_query::BoostQueryBoostStrategyDistribution> for DistributionT
                 }
             }
             "even" => Ok(DistributionType::Even),
+            "lottery" => {
+                let num_winners = value.num_winners.ok_or("missing num winners")?;
+
+                todo!()
+            },
             _ => Err("invalid distribution"),
         }
     }
@@ -499,7 +505,7 @@ async fn get_user_reward(
     proposal_info: &ProposalInfo,
     vote_info: &VoteInfo,
 ) -> Result<U256, ServerError> {
-    match boost_info.params.distribution {
+    match &boost_info.params.distribution {
         DistributionType::Even => {
             if let Some(boosted_choice) = boost_info.params.eligibility.boosted_choice() {
                 // Only count the number of votes that voted for the boosted choice
@@ -520,7 +526,7 @@ async fn get_user_reward(
                     client.expect("client should be here"),
                     boost_info,
                     proposal_info,
-                    limit,
+                    *limit,
                 )
                 .await?;
                 Ok(*rewards
@@ -534,6 +540,9 @@ async fn get_user_reward(
                 let voting_power = U256::from((vote_info.voting_power * pow) as u128);
                 Ok((voting_power * boost_info.pool_size) / score)
             }
+        }
+        DistributionType::Lottery(_prizes) => {
+            todo!("compute");
         }
     }
 }
