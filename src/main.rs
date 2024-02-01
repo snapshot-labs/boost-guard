@@ -84,10 +84,10 @@ mod tests {
     async fn test_get_rewards() {
         let app = super::app();
         let query = QueryParams {
-            proposal_id: "0x907c2d9f6030f6dc8d5d47a946f5bb06b05518c16bc1849a857c3cfea9d18e35"
+            proposal_id: "0x27a6c456ccb0ce4f7da89ccfa4fd2e9c24d770ea2de378bc179214c3af2f74cc"
                 .to_string(),
             voter_address: "0x3901D0fDe202aF1427216b79f5243f8A022d68cf".to_string(),
-            boosts: vec![("2".to_string(), "11155111".to_string())],
+            boosts: vec![("15".to_string(), "11155111".to_string())],
         };
 
         let response = app

@@ -64,15 +64,15 @@ pub async fn cached_lottery_winners(
     let seed = ChaCha20Rng::from_entropy().gen(); // e.g from block ranDAO reveal
 
     // Every voter is eligible to the same reward!
-    if votes.len() < num_winners as usize {
+    if votes.len() <= num_winners as usize {
         return Ok(votes.into_iter().map(|v| (v.voter, prize)).collect());
     }
 
-    Ok(draw_winners(&votes, seed, num_winners, prize))
+    Ok(draw_winners(votes, seed, num_winners, prize))
 }
 
 fn draw_winners(
-    votes: &[VoteInfo],
+    mut votes: Vec<VoteInfo>,
     seed: u64,
     num_winners: u32,
     prize: U256,
@@ -81,8 +81,16 @@ fn draw_winners(
     let mut winners = HashMap::with_capacity(num_winners as usize);
 
     for _ in 0..num_winners {
-        let vote = votes.choose_weighted(&mut rng, |v| v.voting_power).unwrap(); // todo optimize by using u128 instead of f64?
-        winners.insert(vote.voter, prize);
+        let voter = votes
+            .choose_weighted(&mut rng, |v| v.voting_power)
+            .unwrap()
+            .voter; // todo optimize by using u128 instead of f64?
+        let idx = votes
+            .iter()
+            .position(|v| v.voter == voter)
+            .expect("should find voter");
+        votes.remove(idx); // todo: maybe use hashmap if this becomes a bottleneck
+        winners.insert(voter, prize);
     }
     winners
 }
@@ -115,7 +123,7 @@ mod test_draw_winners {
 
         // Draw 10000 times, expect voter 2 to get picked about 100 times.
         for _ in 0..10000 {
-            let winners = draw_winners(&votes, rng.gen(), 1, prize);
+            let winners = draw_winners(votes.clone(), rng.gen(), 1, prize);
             if winners.get(&vote2.voter).is_some() {
                 num += 1;
             }
@@ -124,5 +132,29 @@ mod test_draw_winners {
         // Allow for a margin of error
         assert!(num >= 70);
         assert!(num <= 130);
+    }
+
+    #[test]
+    fn select_two() {
+        let vote1 = VoteInfo {
+            voting_power: 98.0,
+            ..Default::default()
+        };
+        let vote2 = VoteInfo {
+            voting_power: 1.0,
+            ..Default::default()
+        };
+        let vote3 = VoteInfo {
+            voting_power: 1.0,
+            ..Default::default()
+        };
+        let votes = vec![vote1.clone(), vote2.clone(), vote3.clone()];
+        println!("{}, {}, {}", vote1.voter, vote2.voter, vote3.voter);
+        let prize = U256::from(10);
+
+        let mut rng = ChaCha8Rng::from_entropy();
+
+        let winners = draw_winners(votes, rng.gen(), 2, prize);
+        assert_eq!(winners.len(), 2);
     }
 }
