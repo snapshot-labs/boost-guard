@@ -61,7 +61,7 @@ pub async fn cached_lottery_winners(
     }
 
     let prize = boost_info.pool_size / num_winners;
-    let seed = ChaCha20Rng::from_entropy().gen(); // e.g from block ranDAO reveal
+    let seed = ChaCha20Rng::from_entropy().gen(); // todo: e.g from block ranDAO reveal
 
     // Every voter is eligible to the same reward!
     if votes.len() <= num_winners as usize {
@@ -72,7 +72,7 @@ pub async fn cached_lottery_winners(
 }
 
 fn draw_winners(
-    mut votes: Vec<VoteInfo>,
+    votes: Vec<VoteInfo>,
     seed: u64,
     num_winners: u32,
     prize: U256,
@@ -80,17 +80,41 @@ fn draw_winners(
     let mut rng = ChaCha20Rng::seed_from_u64(seed);
     let mut winners = HashMap::with_capacity(num_winners as usize);
 
+    let mut set = std::collections::HashSet::new();
+
+    // Construct the cumulative weights (e.g; [1, 2, 3, 4] -> [1, 3, 6, 10])
+    let mut cumulative_weights = Vec::with_capacity(votes.len());
+    let mut curr = votes[0].voting_power;
+    cumulative_weights.push(curr);
+    for v in votes.iter().skip(1) {
+        curr += v.voting_power;
+        cumulative_weights.push(curr);
+    }
+
+    // TODO: we could optimize by sorting by votes and then poping the last element (which has the highest
+    // probability of getting picked). For now, we don't optimize.
+    let range = 0.0..*cumulative_weights.last().unwrap();
     for _ in 0..num_winners {
-        let voter = votes
-            .choose_weighted(&mut rng, |v| v.voting_power)
-            .unwrap()
-            .voter; // todo optimize by using u128 instead of f64?
-        let idx = votes
-            .iter()
-            .position(|v| v.voter == voter)
-            .expect("should find voter");
-        votes.remove(idx); // todo: maybe use hashmap if this becomes a bottleneck
-        winners.insert(voter, prize);
+        let winner = loop {
+            // Generate a random number between 0 and the highest element of the cumulative weights
+            let rnd: f64 = rng.gen_range(range.clone());
+            // Get the index of the first element that is greater than or equal to the random number
+            let idx = cumulative_weights.iter().position(|x| *x >= rnd).unwrap();
+            // Get the corresponding winner address
+            let winner = votes.get(idx).unwrap().voter;
+
+            // If the winner has been selected before, draw again.
+            if set.contains(&winner) {
+                continue;
+            } else {
+                break winner;
+            }
+        };
+
+        // Add winner to the set
+        set.insert(winner);
+        // Add winner to the winners map
+        winners.insert(winner, prize);
     }
     winners
 }
@@ -105,7 +129,7 @@ mod test_draw_winners {
     use rand_chacha::ChaCha8Rng;
 
     #[test]
-    fn sample_winners() {
+    fn test_randomness() {
         let vote1 = VoteInfo {
             voting_power: 99.0,
             ..Default::default()
@@ -156,5 +180,25 @@ mod test_draw_winners {
 
         let winners = draw_winners(votes, rng.gen(), 2, prize);
         assert_eq!(winners.len(), 2);
+    }
+
+    #[test]
+    fn test_speed() {
+        let votes = (0..1000000)
+            .enumerate()
+            .map(|(i, _)| VoteInfo {
+                voting_power: i as f64,
+                ..Default::default()
+            })
+            .collect();
+        let prize = U256::from(10);
+
+        let mut rng = ChaCha8Rng::from_entropy();
+
+        let start = std::time::Instant::now();
+        println!("start");
+        let _ = draw_winners(votes, rng.gen(), 1000, prize);
+        let finish = std::time::Instant::now();
+        println!("Time: {:?}", finish - start);
     }
 }
