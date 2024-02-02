@@ -59,6 +59,7 @@ pub async fn handle_get_rewards(
     Ok(Json(response))
 }
 
+// TODO: kind of a rewrite of get_rewards?
 pub async fn handle_get_lottery_winners(
     Extension(state): Extension<State>,
     Json(p): Json<Value>,
