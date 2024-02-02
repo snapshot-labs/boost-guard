@@ -59,6 +59,57 @@ pub async fn handle_get_rewards(
     Ok(Json(response))
 }
 
+pub async fn handle_get_lottery_winners(
+    Extension(state): Extension<State>,
+    Json(p): Json<Value>,
+) -> Result<impl IntoResponse, ServerError> {
+    println!("1");
+    let request: GetLotteryWinnerQueryParams = serde_json::from_value(p)?;
+    let proposal_info: ProposalInfo =
+        get_proposal_info(&state.client, &request.proposal_id).await?;
+
+    if let Err(e) = validate_proposal_info(&proposal_info) {
+        if let ServerError::ProposalStillInProgress = e {
+            // Proposal is still in progress, so we should remove the proposal from the cache.
+            let mut cache = GET_PROPOSAL_INFO.lock().await;
+            cache.cache_remove(request.proposal_id.as_str());
+            return Err(e);
+        } else {
+            // Proposal is invalid for a reason that will not change with other queries. Just return the error.
+            return Err(e);
+        }
+    }
+
+    let boost_info = get_boost_info(&state.client, &request.boost_id).await?;
+
+    // Ensure the requested proposal id actually corresponds to the boosted proposal
+    if boost_info.params.proposal != request.proposal_id {
+        return Err(ServerError::ErrorString("proposal id mismatch".to_string()));
+    }
+
+    if let DistributionType::Lottery(num_winners) = boost_info.params.distribution {
+        let winners = cached_lottery_winners(
+            Some(&state.client),
+            &boost_info,
+            &proposal_info,
+            num_winners,
+        )
+        .await?;
+
+        let response = GetLotteryWinnersResponse {
+            winners: winners.keys().map(|a| format!("{a:?}")).collect(),
+            prize: "0".to_string(),
+            chain_id: "0".to_string(),
+            boost_id: "0".to_string(),
+        };
+        Ok(Json(response))
+    } else {
+        Err(ServerError::ErrorString(
+            "boost is not a lottery".to_string(),
+        ))
+    }
+}
+
 pub async fn handle_health() -> Result<impl IntoResponse, ServerError> {
     Ok(axum::response::Html("Healthy!"))
 }
@@ -75,6 +126,14 @@ pub struct CreateVouchersResponse {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GetRewardsResponse {
     pub reward: String,
+    pub chain_id: String,
+    pub boost_id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct GetLotteryWinnersResponse {
+    pub winners: Vec<String>,
+    pub prize: String,
     pub chain_id: String,
     pub boost_id: String,
 }
@@ -102,6 +161,13 @@ pub struct QueryParams {
     pub proposal_id: String,
     pub voter_address: String,
     pub boosts: Vec<(String, String)>, // Vec<(boost_id, chain_id)>
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct GetLotteryWinnerQueryParams {
+    pub proposal_id: String,
+    pub boost_id: String,
+    pub chain_id: String,
 }
 
 type Bytes = Address;

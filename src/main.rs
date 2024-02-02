@@ -34,6 +34,10 @@ fn app() -> Router {
     Router::new()
         .route("/create-vouchers", post(handle_create_vouchers))
         .route("/get-rewards", post(handle_get_rewards))
+        .route(
+            "/get-lottery-winners",
+            post(boost_guard::routes::handle_get_lottery_winners),
+        )
         .route("/health", get(handle_health))
         .layer(Extension(state))
 }
@@ -42,7 +46,10 @@ fn app() -> Router {
 mod tests {
     use axum::body::Body;
     use axum::http;
-    use boost_guard::routes::{CreateVouchersResponse, GetRewardsResponse, QueryParams};
+    use boost_guard::routes::{
+        CreateVouchersResponse, GetLotteryWinnerQueryParams, GetLotteryWinnersResponse,
+        GetRewardsResponse, QueryParams,
+    };
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
@@ -107,6 +114,38 @@ mod tests {
         if response.is_err() {
             println!("ERROR: {}", String::from_utf8(bytes.to_vec()).unwrap());
             panic!();
+        } else {
+            println!("OK: {:?}", response.unwrap());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_lottery_winners() {
+        let app = super::app();
+        let query = GetLotteryWinnerQueryParams {
+            proposal_id: "0x27a6c456ccb0ce4f7da89ccfa4fd2e9c24d770ea2de378bc179214c3af2f74cc"
+                .to_string(),
+            boost_id: "14".to_string(),
+            chain_id: "11155111".to_string(),
+        };
+
+        let response = app
+            .oneshot(
+                http::Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/get-lottery-winners")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(Body::from(serde_json::to_vec(&query).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let response: Result<GetLotteryWinnersResponse, _> = serde_json::from_slice(&bytes);
+        if response.is_err() {
+            println!("ERROR: {}", String::from_utf8(bytes.to_vec()).unwrap());
+            panic!("failed test");
         } else {
             println!("OK: {:?}", response.unwrap());
         }
