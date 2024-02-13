@@ -1,6 +1,7 @@
 use axum::response::{IntoResponse, Response};
 use hyper::http::StatusCode;
 
+pub mod lottery;
 pub mod routes;
 pub mod signatures;
 
@@ -29,6 +30,7 @@ lazy_static! {
 #[derive(Debug, PartialEq, Clone)]
 pub enum ServerError {
     ErrorString(String),
+    ProposalStillInProgress,
 }
 
 impl<T: std::string::ToString + Sized> From<T> for ServerError {
@@ -39,9 +41,16 @@ impl<T: std::string::ToString + Sized> From<T> for ServerError {
 
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
-        let ServerError::ErrorString(body) = self;
-
-        (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
+        match self {
+            ServerError::ErrorString(body) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
+            }
+            ServerError::ProposalStillInProgress => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Proposal has not ended yet",
+            )
+                .into_response(),
+        }
     }
 }
 

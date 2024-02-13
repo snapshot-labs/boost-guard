@@ -1,4 +1,5 @@
 use self::boost_query::BoostQueryBoostStrategyDistribution;
+use crate::lottery::cached_lottery_winners;
 use crate::routes::boost_query::BoostQueryBoostStrategy;
 use crate::routes::boost_query::BoostQueryBoostStrategyEligibility;
 use crate::signatures::ClaimConfig;
@@ -8,7 +9,9 @@ use ::axum::extract::Json;
 use axum::response::IntoResponse;
 use axum::Extension;
 use cached::proc_macro::cached;
-use cached::SizedCache;
+use cached::Cached;
+use cached::{SizedCache, TimedSizedCache};
+use durations::WEEK;
 use ethers::types::Address;
 use ethers::types::U256;
 use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
@@ -51,9 +54,61 @@ pub async fn handle_get_rewards(
         .await?
         .into_iter()
         .map(GetRewardsResponse::from)
-        .collect::<Vec<_>>(); // todo
+        .collect::<Vec<_>>();
 
     Ok(Json(response))
+}
+
+// TODO: kind of a rewrite of get_rewards?
+pub async fn handle_get_lottery_winners(
+    Extension(state): Extension<State>,
+    Json(p): Json<Value>,
+) -> Result<impl IntoResponse, ServerError> {
+    println!("1");
+    let request: GetLotteryWinnerQueryParams = serde_json::from_value(p)?;
+    let proposal_info: ProposalInfo =
+        get_proposal_info(&state.client, &request.proposal_id).await?;
+
+    if let Err(e) = validate_proposal_info(&proposal_info) {
+        if let ServerError::ProposalStillInProgress = e {
+            // Proposal is still in progress, so we should remove the proposal from the cache.
+            let mut cache = GET_PROPOSAL_INFO.lock().await;
+            cache.cache_remove(request.proposal_id.as_str());
+            return Err(e);
+        } else {
+            // Proposal is invalid for a reason that will not change with other queries. Just return the error.
+            return Err(e);
+        }
+    }
+
+    let boost_info = get_boost_info(&state.client, &request.boost_id).await?;
+
+    // Ensure the requested proposal id actually corresponds to the boosted proposal
+    if boost_info.params.proposal != request.proposal_id {
+        return Err(ServerError::ErrorString("proposal id mismatch".to_string()));
+    }
+
+    if let DistributionType::Lottery(num_winners) = boost_info.params.distribution {
+        let winners = cached_lottery_winners(
+            Some(&state.client),
+            &boost_info,
+            &proposal_info,
+            num_winners,
+        )
+        .await?;
+
+        let response = GetLotteryWinnersResponse {
+            winners: winners.keys().map(|a| format!("{a:?}")).collect(),
+            prize: "0".to_string(),
+            chain_id: "0".to_string(),
+            boost_id: "0".to_string(),
+        };
+        Ok(Json(response))
+    } else {
+        Err(ServerError::ErrorString(
+            "boost is not a lottery".to_string(),
+        ))
+    }
 }
 
 pub async fn handle_health() -> Result<impl IntoResponse, ServerError> {
@@ -72,6 +127,14 @@ pub struct CreateVouchersResponse {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GetRewardsResponse {
     pub reward: String,
+    pub chain_id: String,
+    pub boost_id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct GetLotteryWinnersResponse {
+    pub winners: Vec<String>,
+    pub prize: String,
     pub chain_id: String,
     pub boost_id: String,
 }
@@ -99,6 +162,13 @@ pub struct QueryParams {
     pub proposal_id: String,
     pub voter_address: String,
     pub boosts: Vec<(String, String)>, // Vec<(boost_id, chain_id)>
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct GetLotteryWinnerQueryParams {
+    pub proposal_id: String,
+    pub boost_id: String,
+    pub chain_id: String,
 }
 
 type Bytes = Address;
@@ -133,7 +203,7 @@ struct VotesQuery;
     query_path = "src/graphql/every_vote_query.graphql",
     response_derives = "Debug"
 )]
-struct EveryVoteQuery;
+pub struct EveryVoteQuery;
 
 // List of different types of strategies supported
 #[derive(Debug, Default)]
@@ -226,7 +296,7 @@ pub enum BoostEligibility {
 }
 
 impl BoostEligibility {
-    fn boosted_choice(&self) -> Option<usize> {
+    pub fn boosted_choice(&self) -> Option<usize> {
         if let BoostEligibility::Bribe(choice) = self {
             Some(*choice)
         } else {
@@ -247,6 +317,9 @@ impl TryFrom<BoostQueryBoostStrategyEligibility> for BoostEligibility {
                     .ok_or("missing choice")?
                     .parse()
                     .map_err(|_| "failed to parse choice")?;
+                if choice == 0 {
+                    return Err("invalid choice: 0");
+                }
                 Ok(BoostEligibility::Bribe(choice))
             }
             _ => Err("invalid eligibility"),
@@ -254,10 +327,11 @@ impl TryFrom<BoostQueryBoostStrategyEligibility> for BoostEligibility {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum DistributionType {
-    Weighted(Option<U256>), // The option represents the maximum amount of tokens that can be rewarded.
+    Weighted(Option<U256>), // The option represents the maximum amount of tokens that can be rewarded. If None, there is no limit.
     Even,
+    Lottery(u32), // The number of winners
 }
 
 impl Default for DistributionType {
@@ -282,26 +356,44 @@ impl TryFrom<boost_query::BoostQueryBoostStrategyDistribution> for DistributionT
                 }
             }
             "even" => Ok(DistributionType::Even),
+            "lottery" => {
+                let num_winners = value
+                    .num_winners
+                    .ok_or("missing num winners")?
+                    .parse()
+                    .map_err(|_| "failed to parse num winners")?;
+                Ok(DistributionType::Lottery(num_winners))
+            }
             _ => Err("invalid distribution"),
         }
     }
 }
 
-#[derive(Debug, Clone, Default)]
-struct VoteInfo {
-    voter: Address,
-    voting_power: f64,
-    choice: usize,
+#[derive(Debug, Clone)]
+pub struct VoteInfo {
+    pub voter: Address,
+    pub voting_power: f64,
+    pub choice: usize,
+}
+
+impl Default for VoteInfo {
+    fn default() -> Self {
+        Self {
+            voter: Address::random(),
+            voting_power: 1.0,
+            choice: 1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
-struct ProposalInfo {
-    id: String,
-    type_: String,
-    score: f64,
-    scores_by_choice: Vec<f64>,
-    end: u64,
-    num_votes: u64,
+pub struct ProposalInfo {
+    pub id: String,
+    pub type_: String,
+    pub score: f64,
+    pub scores_by_choice: Vec<f64>,
+    pub end: u64,
+    pub num_votes: u64,
 }
 
 impl ProposalInfo {
@@ -354,15 +446,23 @@ async fn get_rewards_inner(
 ) -> Result<Vec<RewardInfo>, ServerError> {
     let request: QueryParams = serde_json::from_value(p)?;
 
-    // TODO: We could cache the result (only if valid)
     let proposal_info: ProposalInfo =
         get_proposal_info(&state.client, &request.proposal_id).await?;
-    // TODO: We could cache the result (only if valid)
+
+    if let Err(e) = validate_proposal_info(&proposal_info) {
+        if let ServerError::ProposalStillInProgress = e {
+            // Proposal is still in progress, so we should remove the proposal from the cache.
+            let mut cache = GET_PROPOSAL_INFO.lock().await;
+            cache.cache_remove(request.proposal_id.as_str());
+            return Err(e);
+        } else {
+            // Proposal is invalid for a reason that will not change with other queries. Just return the error.
+            return Err(e);
+        }
+    }
+
     let vote_info =
         get_vote_info(&state.client, &request.voter_address, &request.proposal_id).await?;
-
-    validate_end_time(proposal_info.end)?;
-    validate_type(&proposal_info.type_)?;
 
     let mut response = Vec::with_capacity(request.boosts.len());
     for (boost_id, chain_id) in request.boosts {
@@ -410,6 +510,13 @@ async fn get_rewards_inner(
     Ok(response)
 }
 
+#[cached(
+    result = true,
+    sync_writes = true,
+    type = "TimedSizedCache<String, ProposalInfo>",
+    create = "{ TimedSizedCache::with_size_and_lifespan(100, 3 * WEEK.as_secs()) }",
+    convert = r#"{ proposal_id.to_string() }"#
+)]
 async fn get_proposal_info(
     client: &reqwest::Client,
     proposal_id: &str,
@@ -456,6 +563,13 @@ async fn get_boost_info(
     Ok(BoostInfo::try_from(boost)?)
 }
 
+#[cached(
+    result = true,
+    sync_writes = true,
+    type = "TimedSizedCache<String, VoteInfo>",
+    create = "{ TimedSizedCache::with_size_and_lifespan(2000, 3 * WEEK.as_secs()) }",
+    convert = r#"{ format!("{}{}", voter_address, proposal_id) }"#
+)]
 async fn get_vote_info(
     client: &reqwest::Client,
     voter_address: &str,
@@ -499,7 +613,7 @@ async fn get_user_reward(
     proposal_info: &ProposalInfo,
     vote_info: &VoteInfo,
 ) -> Result<U256, ServerError> {
-    match boost_info.params.distribution {
+    match &boost_info.params.distribution {
         DistributionType::Even => {
             if let Some(boosted_choice) = boost_info.params.eligibility.boosted_choice() {
                 // Only count the number of votes that voted for the boosted choice
@@ -520,7 +634,7 @@ async fn get_user_reward(
                     client.expect("client should be here"),
                     boost_info,
                     proposal_info,
-                    limit,
+                    *limit,
                 )
                 .await?;
                 Ok(*rewards
@@ -535,6 +649,10 @@ async fn get_user_reward(
                 Ok((voting_power * boost_info.pool_size) / score)
             }
         }
+        DistributionType::Lottery(num_winners) => {
+            let winners = cached_lottery_winners(client, boost_info, proposal_info, *num_winners).await?;
+            Ok(*winners.get(&vote_info.voter).ok_or("voter did not win this time!")?)
+        }
     }
 }
 
@@ -542,8 +660,8 @@ async fn get_user_reward(
 #[cached(
     result = true,
     sync_writes = true,
-    type = "SizedCache<String, U256>",
-    create = "{ SizedCache::with_size(500) }",
+    type = "TimedSizedCache<String, U256>",
+    create = "{ TimedSizedCache::with_size_and_lifespan(500, 3 * WEEK.as_secs()) }",
     convert = r#"{ format!("{}{}", _boost_info.id, _boost_info.chain_id) }"#
 )]
 async fn cached_num_votes(
@@ -579,7 +697,11 @@ async fn cached_num_votes(
     Ok(U256::from(num_votes))
 }
 
-#[cached]
+#[cached(
+    sync_writes = true,
+    type = "SizedCache<u8, f64>",
+    create = "{ SizedCache::with_size(18) }"
+)]
 fn cached_pow(decimals: u8) -> f64 {
     10f64.powi(decimals as i32)
 }
@@ -588,8 +710,8 @@ fn cached_pow(decimals: u8) -> f64 {
 #[cached(
     result = true,
     sync_writes = true,
-    type = "SizedCache<String, HashMap<Address, U256>>",
-    create = "{ SizedCache::with_size(100) }",
+    type = "TimedSizedCache<String, HashMap<Address, U256>>",
+    create = "{ TimedSizedCache::with_size_and_lifespan(100, 3 * WEEK.as_secs()) }",
     convert = r#"{ format!("{}{}", boost_info.id, boost_info.chain_id) }"#
 )]
 async fn cached_rewards(
@@ -686,6 +808,12 @@ fn compute_rewards(
         .collect())
 }
 
+fn validate_proposal_info(proposal_info: &ProposalInfo) -> Result<(), ServerError> {
+    validate_end_time(proposal_info.end)?;
+    validate_type(&proposal_info.type_)?;
+    Ok(())
+}
+
 // We don't need to validate start_time because the smart-contract will do it anyway.
 fn validate_end_time(end: u64) -> Result<(), ServerError> {
     let current_timestamp = SystemTime::now()
@@ -693,9 +821,7 @@ fn validate_end_time(end: u64) -> Result<(), ServerError> {
         .unwrap() // Safe to unwrap because we are sure that the current time is after the UNIX_EPOCH
         .as_secs();
     if current_timestamp < end {
-        Err(ServerError::ErrorString(format!(
-            "proposal has not ended yet: {end:} > {current_timestamp:}",
-        )))
+        Err(ServerError::ProposalStillInProgress)
     } else {
         Ok(())
     }

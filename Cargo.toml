@@ -21,6 +21,9 @@ ethers = { version = "2.0.11", features = ["eip712"] }
 dotenv = "0.15.0"
 lazy_static = "1.4.0"
 cached = { version = "0.48.1", features = ["proc_macro", "async"] }
+rand = "0.8.5"
+rand_chacha = "0.3.1"
+durations = "0.1.1"
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }
