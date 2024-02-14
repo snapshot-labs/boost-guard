@@ -4,7 +4,7 @@ use crate::routes::boost_query::BoostQueryBoostStrategy;
 use crate::routes::boost_query::BoostQueryBoostStrategyEligibility;
 use crate::signatures::ClaimConfig;
 use crate::State;
-use crate::{ServerError, HUB_URL, SUBGRAPH_URL};
+use crate::{ServerError, HUB_URL, SUBGRAPH_URLS};
 use ::axum::extract::Json;
 use axum::response::IntoResponse;
 use axum::Extension;
@@ -81,7 +81,7 @@ pub async fn handle_get_lottery_winners(
         }
     }
 
-    let boost_info = get_boost_info(&state.client, &request.boost_id).await?;
+    let boost_info = get_boost_info(&state.client, &request.boost_id, &request.chain_id).await?;
 
     // Ensure the requested proposal id actually corresponds to the boosted proposal
     if boost_info.params.proposal != request.proposal_id {
@@ -466,7 +466,7 @@ async fn get_rewards_inner(
 
     let mut response = Vec::with_capacity(request.boosts.len());
     for (boost_id, chain_id) in request.boosts {
-        let boost_info = match get_boost_info(&state.client, &boost_id).await {
+        let boost_info = match get_boost_info(&state.client, &boost_id, &chain_id).await {
             Ok(boost_info) => boost_info,
             Err(e) => {
                 eprintln!("{:?}", e);
@@ -544,6 +544,7 @@ async fn get_proposal_info(
 async fn get_boost_info(
     client: &reqwest::Client,
     boost_id: &str,
+    chain_id: &str,
 ) -> Result<BoostInfo, ServerError> {
     let variables = boost_query::Variables {
         id: boost_id.to_owned(),
@@ -552,7 +553,7 @@ async fn get_boost_info(
     let request_body = BoostQuery::build_query(variables);
 
     let res = client
-        .post(SUBGRAPH_URL.as_str())
+        .post(SUBGRAPH_URLS.get(chain_id).unwrap().as_str())
         .json(&request_body)
         .send()
         .await?;

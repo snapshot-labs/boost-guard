@@ -1,11 +1,13 @@
 name: CI
 env:
   PRIVATE_KEY: '0xafdfd9c3d2095ef696594f6cedcae59e72dcd697e2a7521b1578140422a4f890' # This is a test private key
-  HUB_URL: "https://testnet.hub.snapshot.org/graphql"
-  SUBGRAPH_URL: "https://api.thegraph.com/subgraphs/name/snapshot-labs/boost-sepolia"
+  TESTNET_HUB_URL: "https://testnet.hub.snapshot.org/graphql"
+  HUB_URL: "https://hub.snapshot.org/graphql"
+  SEPOLIA_SUBGRAPH_URL: "https://api.thegraph.com/subgraphs/name/snapshot-labs/boost-sepolia"
+  MAINNET_SUBGRAPH_URL: "https://api.thegraph.com/subgraphs/name/pscott/boost-mainnet"
   BOOST_NAME: "boost"
   BOOST_VERSION: "1"
-  VERIFYING_CONTRACT: "0x3a18420C0646CC8e6D46E43d792335AeCB657fd0"
+  VERIFYING_CONTRACT: "0x506661e5921f2c74b56eb380936f6e197c6cf49c"
 
 # This workflow run tests and build for each push
 

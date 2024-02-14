@@ -8,6 +8,7 @@ pub mod signatures;
 use std::env;
 extern crate dotenv;
 use dotenv::dotenv;
+use std::collections::HashMap;
 
 #[macro_use]
 extern crate lazy_static;
@@ -15,10 +16,31 @@ extern crate lazy_static;
 lazy_static! {
     static ref HUB_URL: String = {
         dotenv().ok();
-        env::var("HUB_URL").expect("Please add HUB_URL to your environment or .env file.")
+
+        #[cfg(test)]
+        return env::var("TESTNET_HUB_URL")
+            .expect("Please add TESTNET_HUB_URL to your environment or .env file.");
+
+        #[cfg(not(test))]
+        return env::var("HUB_URL").expect("Please add HUB_URL to your environment or .env file.");
     };
-    static ref SUBGRAPH_URL: String = env::var("SUBGRAPH_URL")
-        .expect("Please add SUBGRAPH_URL to your environment or .env file.");
+    static ref SUBGRAPH_URLS: HashMap<&'static str, String> = {
+        let mut map = HashMap::new();
+
+        map.insert(
+            "1",
+            env::var("MAINNET_SUBGRAPH_URL")
+                .expect("Please add SUBGRAPH_URL to your environment or .env file."),
+        );
+
+        map.insert(
+            "11155111",
+            env::var("TESTNET_SUBGRAPH_URL")
+                .expect("Please add SUBGRAPH_URL to your environment or .env file."),
+        );
+
+        map
+    };
     static ref BOOST_NAME: String =
         env::var("BOOST_NAME").expect("Please add BOOST_NAME to your environment or .env file");
     static ref BOOST_VERSION: String = env::var("BOOST_VERSION")
