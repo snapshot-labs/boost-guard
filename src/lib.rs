@@ -25,18 +25,19 @@ lazy_static! {
         return env::var("HUB_URL").expect("Please add HUB_URL to your environment or .env file.");
     };
     static ref SUBGRAPH_URLS: HashMap<&'static str, String> = {
+        dotenv().ok();
         let mut map = HashMap::new();
 
         map.insert(
             "1",
             env::var("MAINNET_SUBGRAPH_URL")
-                .expect("Please add SUBGRAPH_URL to your environment or .env file."),
+                .expect("Please add MAINNET_SUBGRAPH_URL to your environment or .env file."),
         );
 
         map.insert(
             "11155111",
-            env::var("TESTNET_SUBGRAPH_URL")
-                .expect("Please add SUBGRAPH_URL to your environment or .env file."),
+            env::var("SEPOLIA_SUBGRAPH_URL")
+                .expect("Please add SEPOLIA_SUBGRAPH_URL to your environment or .env file."),
         );
 
         map

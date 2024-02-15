@@ -64,7 +64,6 @@ pub async fn handle_get_lottery_winners(
     Extension(state): Extension<State>,
     Json(p): Json<Value>,
 ) -> Result<impl IntoResponse, ServerError> {
-    println!("1");
     let request: GetLotteryWinnerQueryParams = serde_json::from_value(p)?;
     let proposal_info: ProposalInfo =
         get_proposal_info(&state.client, &request.proposal_id).await?;
@@ -82,6 +81,7 @@ pub async fn handle_get_lottery_winners(
     }
 
     let boost_info = get_boost_info(&state.client, &request.boost_id, &request.chain_id).await?;
+    println!("{:?}", boost_info);
 
     // Ensure the requested proposal id actually corresponds to the boosted proposal
     if boost_info.params.proposal != request.proposal_id {
@@ -99,9 +99,9 @@ pub async fn handle_get_lottery_winners(
 
         let response = GetLotteryWinnersResponse {
             winners: winners.keys().map(|a| format!("{a:?}")).collect(),
-            prize: "0".to_string(),
-            chain_id: "0".to_string(),
-            boost_id: "0".to_string(),
+            prize: winners.values().next().unwrap().to_string(),
+            chain_id: request.chain_id.to_string(),
+            boost_id: request.boost_id.to_string(),
         };
         Ok(Json(response))
     } else {
@@ -558,9 +558,9 @@ async fn get_boost_info(
         .send()
         .await?;
     let response_body: GraphQLResponse<boost_query::ResponseData> = res.json().await?;
-    let boost_query = response_body.data.ok_or("missing data from the hub")?;
+    let boost_query = response_body.data.ok_or("missing data from the graph")?;
 
-    let boost = boost_query.boost.ok_or("missing boost from the hub")?;
+    let boost = boost_query.boost.ok_or("missing boost from the graph")?;
     Ok(BoostInfo::try_from(boost)?)
 }
 
