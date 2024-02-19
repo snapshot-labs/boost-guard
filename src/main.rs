@@ -59,10 +59,10 @@ mod tests {
     async fn test_create_vouchers() {
         let app = super::app();
         let query = QueryParams {
-            proposal_id: "0x907c2d9f6030f6dc8d5d47a946f5bb06b05518c16bc1849a857c3cfea9d18e35"
+            proposal_id: "0x5c4d271f77150458cb0265cd5b473dd970bb5fa1fe4e006775c52b94c8e363a1"
                 .to_string(),
-            voter_address: "0x3901D0fDe202aF1427216b79f5243f8A022d68cf".to_string(),
-            boosts: vec![("2".to_string(), "11155111".to_string())],
+            voter_address: "0xc83A9e69012312513328992d454290be85e95101".to_string(),
+            boosts: vec![("0".to_string(), "1".to_string())],
         };
 
         let response = app
