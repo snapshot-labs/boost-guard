@@ -234,15 +234,14 @@ pub struct BoostInfo {
     pub decimals: u8,
 }
 
-impl TryFrom<boost_query::BoostQueryBoost> for BoostInfo {
+impl TryFrom<(boost_query::BoostQueryBoost, &str)> for BoostInfo {
     type Error = &'static str;
 
-    fn try_from(value: boost_query::BoostQueryBoost) -> Result<Self, Self::Error> {
-        let id = value.id.parse().map_err(|_| "failed to parse id")?;
-        let chain_id =
-            U256::from_dec_str(&value.chain_id).map_err(|_| "failed to parse chain id")?;
+    fn try_from(value: (boost_query::BoostQueryBoost, &str)) -> Result<Self, Self::Error> {
+        let id = value.0.id.parse().map_err(|_| "failed to parse id")?;
+        let chain_id = U256::from_dec_str(value.1).map_err(|_| "failed to parse chain id")?;
         let strategy: BoostQueryBoostStrategy =
-            value.strategy.ok_or("strategy missing from query")?;
+            value.0.strategy.ok_or("strategy missing from query")?;
         let name = strategy.name.as_str();
         let strategy_type = BoostStrategy::try_from(name)?;
 
@@ -259,9 +258,10 @@ impl TryFrom<boost_query::BoostQueryBoost> for BoostInfo {
                     distribution,
                 };
 
-                let pool_size = U256::from_dec_str(&value.pool_size)
+                let pool_size = U256::from_dec_str(&value.0.pool_size)
                     .map_err(|_| "failed to parse pool size")?;
                 let decimals = value
+                    .0
                     .token
                     .decimals
                     .parse()
@@ -561,7 +561,7 @@ async fn get_boost_info(
     let boost_query = response_body.data.ok_or("missing data from the graph")?;
 
     let boost = boost_query.boost.ok_or("missing boost from the graph")?;
-    Ok(BoostInfo::try_from(boost)?)
+    Ok(BoostInfo::try_from((boost, chain_id))?)
 }
 
 #[cached(

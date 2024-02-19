@@ -23,8 +23,8 @@ ENV PRIVATE_KEY "0xafdfd9c3d2095ef696594f6cedcae59e72dcd697e2a7521b1578140422a4f
 
 ENV HUB_URL "https://hub.snapshot.org/graphql"
 ENV TESTNET_HUB_URL "https://testnet.hub.snapshot.org/graphql"
-ENV SEPOLIA_SUBGRAPH_URL "https://api.thegraph.com/subgraphs/name/snapshot-labs/boost-sepolia"
-ENV MAINNET_SUBGRAPH_URL "https://api.thegraph.com/subgraphs/name/pscott/boost-mainnet"
+ENV SEPOLIA_SUBGRAPH_URL "https://api.studio.thegraph.com/query/23545/boost-sepolia/version/latest"
+ENV MAINNET_SUBGRAPH_URL "https://api.studio.thegraph.com/query/23545/boost/version/latest"
 ENV BOOST_NAME "boost"
 ENV BOOST_VERSION "0.1.0"
 ENV VERIFYING_CONTRACT "0x506661e5921f2c74b56eb380936f6e197c6cf49c"
