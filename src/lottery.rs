@@ -65,6 +65,7 @@ pub async fn cached_lottery_winners(
 
     // Every voter is eligible to the same reward!
     if votes.len() <= num_winners as usize {
+        let prize = boost_info.pool_size / votes.len() as u32;
         return Ok(votes.into_iter().map(|v| (v.voter, prize)).collect());
     }
 
