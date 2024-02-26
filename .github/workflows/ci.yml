@@ -8,6 +8,9 @@ env:
   BOOST_NAME: "boost"
   BOOST_VERSION: "1"
   VERIFYING_CONTRACT: "0x506661e5921f2c74b56eb380936f6e197c6cf49c"
+  SLOT_URL: "https://beaconcha.in/api/v1/slot/"
+  EPOCH_URL: "https://beaconcha.in/api/v1/epoch/"
+  BEACONCHAIN_API_KEY: ${{ secrets.BEACONCHAIN_API_KEY }}
 
 # This workflow run tests and build for each push
 

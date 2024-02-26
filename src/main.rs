@@ -91,10 +91,10 @@ mod tests {
     async fn test_get_rewards() {
         let app = super::app();
         let query = QueryParams {
-            proposal_id: "0x27a6c456ccb0ce4f7da89ccfa4fd2e9c24d770ea2de378bc179214c3af2f74cc"
+            proposal_id: "0x5c4d271f77150458cb0265cd5b473dd970bb5fa1fe4e006775c52b94c8e363a1"
                 .to_string(),
-            voter_address: "0x3901D0fDe202aF1427216b79f5243f8A022d68cf".to_string(),
-            boosts: vec![("15".to_string(), "11155111".to_string())],
+            voter_address: "0xc83A9e69012312513328992d454290be85e95101".to_string(),
+            boosts: vec![("0".to_string(), "1".to_string())],
         };
 
         let response = app
@@ -123,10 +123,10 @@ mod tests {
     async fn test_get_lottery_winners() {
         let app = super::app();
         let query = GetLotteryWinnerQueryParams {
-            proposal_id: "0x5c4d271f77150458cb0265cd5b473dd970bb5fa1fe4e006775c52b94c8e363a1"
+            proposal_id: "0xe2f9d5694f6af28b61b357b80752566654b026343dbdf09d36d291b6325dedb3"
                 .to_string(),
-            boost_id: "0".to_string(),
-            chain_id: "1".to_string(),
+            boost_id: "12".to_string(),
+            chain_id: "11155111".to_string(),
         };
 
         let response = app
