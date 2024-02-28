@@ -88,12 +88,13 @@ pub async fn handle_get_lottery_winners(
         return Err(ServerError::ErrorString("proposal id mismatch".to_string()));
     }
 
-    if let DistributionType::Lottery(num_winners) = boost_info.params.distribution {
+    if let DistributionType::Lottery(num_winners, limit) = boost_info.params.distribution {
         let winners = cached_lottery_winners(
             Some(&state.client),
             &boost_info,
             &proposal_info,
             num_winners,
+            limit,
         )
         .await?;
 
@@ -331,7 +332,7 @@ impl TryFrom<BoostQueryBoostStrategyEligibility> for BoostEligibility {
 pub enum DistributionType {
     Weighted(Option<U256>), // The option represents the maximum amount of tokens that can be rewarded. If None, there is no limit.
     Even,
-    Lottery(u32), // The number of winners
+    Lottery(u32, Option<u16>), // The number of winners
 }
 
 impl Default for DistributionType {
@@ -362,7 +363,16 @@ impl TryFrom<boost_query::BoostQueryBoostStrategyDistribution> for DistributionT
                     .ok_or("missing num winners")?
                     .parse()
                     .map_err(|_| "failed to parse num winners")?;
-                Ok(DistributionType::Lottery(num_winners))
+
+                let limit = value.limit;
+                if let Some(l) = limit {
+                    match l.parse() {
+                        Ok(l) => Ok(DistributionType::Lottery(num_winners, Some(l))),
+                        Err(_) => Err("failed to parse limit"),
+                    }
+                } else {
+                    Ok(DistributionType::Lottery(num_winners, None))
+                }
             }
             _ => Err("invalid distribution"),
         }
@@ -650,8 +660,8 @@ async fn get_user_reward(
                 Ok((voting_power * boost_info.pool_size) / score)
             }
         }
-        DistributionType::Lottery(num_winners) => {
-            let winners = cached_lottery_winners(client, boost_info, proposal_info, *num_winners).await?;
+        DistributionType::Lottery(num_winners, limit) => {
+            let winners = cached_lottery_winners(client, boost_info, proposal_info, *num_winners, *limit).await?;
             Ok(*winners.get(&vote_info.voter).ok_or("voter did not win this time!")?)
         }
     }
