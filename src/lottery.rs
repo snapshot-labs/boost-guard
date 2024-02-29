@@ -1,6 +1,6 @@
 use crate::routes::{every_vote_query, BoostInfo, EveryVoteQuery, ProposalInfo, VoteInfo};
-use crate::ServerError;
-use crate::HUB_URL;
+use crate::{ServerError, BEACONCHAIN_API_KEY};
+use crate::{EPOCH_URL, HUB_URL, SLOT_URL};
 use cached::proc_macro::cached;
 use cached::TimedSizedCache;
 use durations::WEEK;
@@ -8,8 +8,13 @@ use ethers::types::{Address, U256};
 use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
 use rand::prelude::*;
 use rand_chacha::ChaCha20Rng;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::str::FromStr;
+
+const FIRST_MERGED_SLOT: u64 = 4700013;
+const FIRST_MERGED_SLOT_TIMESTAMP: u64 = 1663224179;
 
 // LRU cache that uses `boost_id` and `chain_id` as keys
 #[cached(
@@ -29,6 +34,7 @@ pub async fn cached_lottery_winners(
     let variables = every_vote_query::Variables {
         proposal: proposal_info.id.to_owned(),
     };
+
     let request_body = EveryVoteQuery::build_query(variables);
     let query_results: GraphQLResponse<every_vote_query::ResponseData> = client
         .expect("client should be here")
@@ -72,7 +78,7 @@ pub async fn cached_lottery_winners(
     }
 
     let prize = boost_info.pool_size / num_winners;
-    let seed = ChaCha20Rng::from_entropy().gen(); // todo: e.g from block ranDAO reveal
+    let seed = get_randao_reveal(proposal_info.end).await?;
 
     Ok(draw_winners(votes, seed, num_winners, prize))
 }
@@ -138,11 +144,11 @@ fn adjust_vote_weights(
 
 fn draw_winners(
     votes: Vec<VoteInfo>,
-    seed: u64,
+    seed: [u8; 32],
     num_winners: u32,
     prize: U256,
 ) -> HashMap<Address, U256> {
-    let mut rng = ChaCha20Rng::seed_from_u64(seed);
+    let mut rng = ChaCha20Rng::from_seed(seed);
     let mut winners = HashMap::with_capacity(num_winners as usize);
 
     let mut set = std::collections::HashSet::new();
@@ -182,6 +188,83 @@ fn draw_winners(
         winners.insert(winner, prize);
     }
     winners
+}
+
+// This function tries to map a timestamp to a randao reveal.
+// A randao reveal is a source of randomness provided by the beacon chain. Each epoch has a randao reveal.
+// This function tries to find the epoch that contains the timestamp and returns the randao reveal of that epoch.
+// It does so by following these steps:
+// Step 1: Find the closest slot corresponding to the timestamp (round up to nearest multiple of 12, because slots are 12 seconds long).
+// Step 2: Query the SLOT_URL to get the corresponding slot, and extract its epoch.
+// Step 3: Query the EPOCH_URL to get the corresponding epoch.
+// Step 4: Ensure the epoch is finalized, and return its randao reveal.
+async fn randao_from_timestamp(timestamp: u64) -> Result<String, ServerError> {
+    let client = reqwest::Client::new();
+
+    // Step 1
+    let elapsed = timestamp - FIRST_MERGED_SLOT_TIMESTAMP;
+    let rounded_elapsed = elapsed + (12 - elapsed % 12);
+    let elapsed_slots = rounded_elapsed / 12;
+    let nearest_slot = FIRST_MERGED_SLOT + elapsed_slots;
+
+    println!("nearest slot: {}", nearest_slot);
+    // Step 2
+    let slot_url = format!(
+        "{}{}?apikey={}",
+        SLOT_URL.as_str(),
+        nearest_slot,
+        BEACONCHAIN_API_KEY.as_str()
+    );
+    println!("slot url: {}", slot_url);
+    let slot: Value = client.get(&slot_url).send().await?.json().await?;
+    let epoch = slot["data"]["epoch"]
+        .as_u64()
+        .ok_or("failed to parse epoch")?;
+
+    // Step 3
+    let epoch_url = format!(
+        "{}{}?apikey={}",
+        EPOCH_URL.as_str(),
+        epoch,
+        BEACONCHAIN_API_KEY.as_str()
+    );
+    let epoch_details: Value = client.get(&epoch_url).send().await?.json().await?;
+
+    // Step 4
+    let finalized = epoch_details["data"]["finalized"]
+        .as_bool()
+        .ok_or("finalized is not a boolean")?;
+    if !finalized {
+        return Err("epoch is not finalized".into());
+    }
+
+    println!("epoch details: {:?}", epoch_details["data"]);
+    let randao_reveal = slot["data"]["randaoreveal"]
+        .as_str()
+        .ok_or("randao_reveal is not a string")?
+        .to_string();
+
+    Ok(randao_reveal)
+}
+
+// Create a 32bytes seed with the sha256 hash of the randao reveal corresponding to
+// the next nearest epoch of the given timestamp.
+async fn get_randao_reveal(timestamp: u64) -> Result<[u8; 32], ServerError> {
+    // Step 1: Get the randao reveal from the chain
+    let randao = randao_from_timestamp(timestamp).await?;
+    let bytes = hex::decode(&randao[2..]).unwrap();
+
+    // Step 2: Hash the byte array
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let hash_result = hasher.finalize();
+
+    // Step 3: Convert the hash bytes to a fixed-size array for the seed
+    let seed = hash_result
+        .try_into()
+        .expect("Hash output size is incorrect for seed");
+
+    Ok(seed)
 }
 
 #[cfg(test)]

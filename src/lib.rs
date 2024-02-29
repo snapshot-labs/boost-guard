@@ -42,12 +42,18 @@ lazy_static! {
 
         map
     };
+    static ref BEACONCHAIN_API_KEY: String = env::var("BEACONCHAIN_API_KEY")
+        .expect("Please add BEACONCHAIN_API_KEY to your environment or .env file");
     static ref BOOST_NAME: String =
         env::var("BOOST_NAME").expect("Please add BOOST_NAME to your environment or .env file");
     static ref BOOST_VERSION: String = env::var("BOOST_VERSION")
         .expect("Please add BOOST_VERSION to your environment or .env file");
     static ref VERIFYING_CONTRACT: String = env::var("VERIFYING_CONTRACT")
         .expect("Please add VERIFYING_CONTRACT to your environment or .env file");
+    static ref EPOCH_URL: String =
+        env::var("EPOCH_URL").expect("Please add EPOCH_URL to your environment or .env file");
+    static ref SLOT_URL: String =
+        env::var("SLOT_URL").expect("Please add SLOT_URL to your environment or .env file");
 }
 
 #[derive(Debug, PartialEq, Clone)]

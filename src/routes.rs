@@ -81,7 +81,6 @@ pub async fn handle_get_lottery_winners(
     }
 
     let boost_info = get_boost_info(&state.client, &request.boost_id, &request.chain_id).await?;
-    println!("{:?}", boost_info);
 
     // Ensure the requested proposal id actually corresponds to the boosted proposal
     if boost_info.params.proposal != request.proposal_id {
