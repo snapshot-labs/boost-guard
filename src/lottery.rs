@@ -423,6 +423,38 @@ mod test_adjust_vote_weights {
     }
 
     #[test]
+    fn test_adjust_limit_fourty() {
+        let mut votes = vec![
+            VoteInfo {
+                voting_power: 10.0,
+                ..Default::default()
+            },
+            VoteInfo {
+                voting_power: 10.0,
+                ..Default::default()
+            },
+            VoteInfo {
+                voting_power: 1.0,
+                ..Default::default()
+            },
+            VoteInfo {
+                voting_power: 1.0,
+                ..Default::default()
+            },
+        ];
+        let decimals = 18;
+        let score = votes.iter().map(|v| v.voting_power).sum::<f64>();
+        let limit = 4000; // 40 %
+
+        adjust_vote_weights(&mut votes, decimals, score, limit).unwrap();
+
+        assert_eq!(votes[0].voting_power, 8.8);
+        assert_eq!(votes[1].voting_power, 8.8);
+        assert_eq!(votes[2].voting_power, 2.2);
+        assert_eq!(votes[3].voting_power, 2.2);
+    }
+
+    #[test]
     fn test_adjust_limit_no_op_rounded() {
         let mut votes = vec![
             VoteInfo {
