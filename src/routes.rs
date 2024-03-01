@@ -4,7 +4,7 @@ use crate::routes::boost_query::BoostQueryBoostStrategy;
 use crate::routes::boost_query::BoostQueryBoostStrategyEligibility;
 use crate::signatures::ClaimConfig;
 use crate::State;
-use crate::{ServerError, HUB_URL, SUBGRAPH_URLS};
+use crate::{ServerError, HUB_URL, MYRIAD, SUBGRAPH_URLS};
 use ::axum::extract::Json;
 use axum::response::IntoResponse;
 use axum::Extension;
@@ -366,7 +366,13 @@ impl TryFrom<boost_query::BoostQueryBoostStrategyDistribution> for DistributionT
                 let limit = value.limit;
                 if let Some(l) = limit {
                     match l.parse() {
-                        Ok(l) => Ok(DistributionType::Lottery(num_winners, Some(l))),
+                        Ok(l) => {
+                            if l > MYRIAD {
+                                Err("limit is too high")
+                            } else {
+                                Ok(DistributionType::Lottery(num_winners, Some(l)))
+                            }
+                        }
                         Err(_) => Err("failed to parse limit"),
                     }
                 } else {

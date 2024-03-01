@@ -13,6 +13,8 @@ use std::collections::HashMap;
 #[macro_use]
 extern crate lazy_static;
 
+pub const MYRIAD: u16 = 10_000;
+
 lazy_static! {
     static ref HUB_URL: String = {
         dotenv().ok();

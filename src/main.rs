@@ -123,9 +123,9 @@ mod tests {
     async fn test_get_lottery_winners() {
         let app = super::app();
         let query = GetLotteryWinnerQueryParams {
-            proposal_id: "0xe2f9d5694f6af28b61b357b80752566654b026343dbdf09d36d291b6325dedb3"
+            proposal_id: "0x9f71aae9f1444d97bd4291a15820bf3f5578edfa9c41b45277e97b1d997cecf1"
                 .to_string(),
-            boost_id: "12".to_string(),
+            boost_id: "4".to_string(),
             chain_id: "11155111".to_string(),
         };
 

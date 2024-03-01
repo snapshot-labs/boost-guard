@@ -1,6 +1,6 @@
 use crate::routes::{every_vote_query, BoostInfo, EveryVoteQuery, ProposalInfo, VoteInfo};
 use crate::{ServerError, BEACONCHAIN_API_KEY};
-use crate::{EPOCH_URL, HUB_URL, SLOT_URL};
+use crate::{EPOCH_URL, HUB_URL, MYRIAD, SLOT_URL};
 use cached::proc_macro::cached;
 use cached::TimedSizedCache;
 use durations::WEEK;
@@ -108,7 +108,7 @@ fn adjust_vote_weights(
         return Ok(());
     }
 
-    if votes.len() < (10_000.0 / limit as f64).ceil() as usize {
+    if votes.len() < (MYRIAD as f64 / limit as f64).ceil() as usize {
         // log needed "not enough voters to enforce the limit"
         return Ok(());
     }
@@ -122,7 +122,7 @@ fn adjust_vote_weights(
     let mut adjusted_remaining_score = remaining_score;
 
     // The maximum adjusted voting power that can be assigned to any voter
-    let vp_limit = remaining_score * limit / 10_000; // TODO: constant
+    let vp_limit = remaining_score * limit / MYRIAD;
 
     votes.iter_mut().for_each(|v| {
         let vp = U256::from((v.voting_power * pow) as u128);
