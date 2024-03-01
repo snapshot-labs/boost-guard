@@ -95,17 +95,22 @@ fn adjust_vote_weights(
     score: f64,
     limit: u16,
 ) -> Result<(), ServerError> {
+    if limit == 0 {
+        // log needed
+        return Ok(());
+    }
+
+    if limit == MYRIAD {
+        // log needed
+        return Ok(());
+    }
+
     // Ensure the vector is sorted
     if votes
         .windows(2)
         .any(|w| w[0].voting_power < w[1].voting_power)
     {
         return Err(ServerError::ErrorString("votes are not sorted".to_string()));
-    }
-
-    if limit == 0 {
-        // log needed
-        return Ok(());
     }
 
     if votes.len() < (MYRIAD as f64 / limit as f64).ceil() as usize {
