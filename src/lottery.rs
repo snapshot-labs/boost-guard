@@ -253,12 +253,9 @@ async fn get_randao_reveal(timestamp: u64) -> Result<[u8; 32], ServerError> {
     // Step 2: Hash the byte array
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
-    let hash_result = hasher.finalize();
 
     // Step 3: Convert the hash bytes to a fixed-size array for the seed
-    let seed = hash_result
-        .try_into()
-        .expect("Hash output size is incorrect for seed");
+    let seed = hasher.finalize().into();
 
     Ok(seed)
 }
