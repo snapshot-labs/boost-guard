@@ -38,7 +38,6 @@ pub async fn cached_lottery_winners(
             "".to_string()
         };
 
-    println!("choice: {}", choice_constraint);
     let query = format!(
         "SELECT voter, vp, choice
         FROM votes
@@ -47,11 +46,9 @@ pub async fn cached_lottery_winners(
         ORDER BY vp DESC;",
         proposal_info.id, choice_constraint
     );
-    println!("query: {}", query);
 
     let mut conn = pool.get_conn().await?;
     let result: Vec<(String, f64, u32)> = conn.query(query).await?;
-    println!("result: {:?}", result);
     conn.disconnect().await?;
 
     let mut votes = result
@@ -66,21 +63,17 @@ pub async fn cached_lottery_winners(
 
     // If there are not enough voters, then every voter is eligible to the same reward
     if votes.len() <= num_winners as usize {
-        println!("votes {}, winners: {}", votes.len(), num_winners);
         let prize = boost_info.pool_size / votes.len() as u32;
         return Ok(votes.into_iter().map(|v| (v.voter, prize)).collect());
     }
 
     if let Some(limit) = limit {
-        println!("adjusting");
         adjust_vote_weights(&mut votes, boost_info.decimals, proposal_info.score, limit)?;
     }
 
     let prize = boost_info.pool_size / num_winners;
-    println!("randao ?");
     let seed = get_randao_reveal(proposal_info.end).await?;
 
-    println!("draw winners");
     Ok(draw_winners(votes, seed, num_winners, prize))
 }
 
@@ -213,7 +206,6 @@ async fn randao_from_timestamp(timestamp: u64) -> Result<String, ServerError> {
     let elapsed_slots = rounded_elapsed / 12;
     let nearest_slot = FIRST_MERGED_SLOT + elapsed_slots;
 
-    println!("nearest slot: {}", nearest_slot);
     // Step 2
     let slot_url = format!(
         "{}{}?apikey={}",
@@ -221,7 +213,6 @@ async fn randao_from_timestamp(timestamp: u64) -> Result<String, ServerError> {
         nearest_slot,
         BEACONCHAIN_API_KEY.as_str()
     );
-    println!("slot url: {}", slot_url);
     let slot: Value = client.get(&slot_url).send().await?.json().await?;
     let epoch = slot["data"]["epoch"]
         .as_u64()
@@ -244,7 +235,6 @@ async fn randao_from_timestamp(timestamp: u64) -> Result<String, ServerError> {
         return Err("epoch is not finalized".into());
     }
 
-    println!("epoch details: {:?}", epoch_details["data"]);
     let randao_reveal = slot["data"]["randaoreveal"]
         .as_str()
         .ok_or("randao_reveal is not a string")?
@@ -293,7 +283,6 @@ mod test_draw_winners {
             ..Default::default()
         };
         let votes = vec![vote1.clone(), vote2.clone()];
-        println!("{}, {}", vote1.voter, vote2.voter);
         let prize = U256::from(10);
 
         let mut rng = ChaCha8Rng::from_entropy();
@@ -327,7 +316,6 @@ mod test_draw_winners {
             ..Default::default()
         };
         let votes = vec![vote1.clone(), vote2.clone(), vote3.clone()];
-        println!("{}, {}, {}", vote1.voter, vote2.voter, vote3.voter);
         let prize = U256::from(10);
 
         let mut rng = ChaCha8Rng::from_entropy();
@@ -337,6 +325,7 @@ mod test_draw_winners {
     }
 
     #[test]
+    #[cfg(feature = "expensive_tests")]
     fn test_speed() {
         let votes = (0..1000000)
             .enumerate()
@@ -350,7 +339,6 @@ mod test_draw_winners {
         let mut rng = ChaCha8Rng::from_entropy();
 
         let start = std::time::Instant::now();
-        println!("start");
         let _ = draw_winners(votes, rng.gen(), 1000, prize);
         let finish = std::time::Instant::now();
         println!("Time: {:?}", finish - start);

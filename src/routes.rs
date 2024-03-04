@@ -593,7 +593,6 @@ async fn get_vote_info(
         ORDER BY vp DESC;",
         proposal_id, voter_address
     );
-    println!("QUERY: {}", query);
 
     let (_voter, voting_power, choice): (String, f64, usize) = conn
         .query_first(query)
@@ -617,14 +616,11 @@ async fn get_user_reward(
 ) -> Result<U256, ServerError> {
     match &boost_info.params.distribution {
         DistributionType::Even => {
-            println!("EVEN");
             if let Some(boosted_choice) = boost_info.params.eligibility.boosted_choice() {
-                println!("BOOSTED {}", boosted_choice);
                 // Only count the number of votes that voted for the boosted choice
                 let num_votes = cached_num_votes(pool, boost_info, proposal_info, boosted_choice);
                 Ok(boost_info.pool_size / num_votes.await?)
             } else {
-                println!("Not boosted");
                 Ok(boost_info.pool_size / (U256::from(proposal_info.num_votes)))
             }
         }
@@ -719,7 +715,6 @@ async fn cached_weighted_rewards(
     } else {
         "".to_string()
     };
-    println!("CHOICE {}", choice_clause);
 
     let query = format!(
         "SELECT voter, vp
