@@ -1,11 +1,11 @@
-use crate::routes::{every_vote_query, BoostInfo, EveryVoteQuery, ProposalInfo, VoteInfo};
+use crate::routes::{BoostInfo, ProposalInfo, Vote};
 use crate::{ServerError, BEACONCHAIN_API_KEY};
-use crate::{EPOCH_URL, HUB_URL, MYRIAD, SLOT_URL};
+use crate::{EPOCH_URL, MYRIAD, SLOT_URL};
 use cached::proc_macro::cached;
 use cached::TimedSizedCache;
 use durations::WEEK;
 use ethers::types::{Address, U256};
-use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
+use mysql_async::prelude::Queryable;
 use rand::prelude::*;
 use rand_chacha::ChaCha20Rng;
 use serde_json::Value;
@@ -25,61 +25,62 @@ const FIRST_MERGED_SLOT_TIMESTAMP: u64 = 1663224179;
     convert = r#"{ format!("{}{}", boost_info.id, boost_info.chain_id) }"#
 )]
 pub async fn cached_lottery_winners(
-    client: Option<&reqwest::Client>,
+    pool: &mysql_async::Pool,
     boost_info: &BoostInfo,
     proposal_info: &ProposalInfo,
     num_winners: u32,
     limit: Option<u16>,
 ) -> Result<HashMap<Address, U256>, ServerError> {
-    let variables = every_vote_query::Variables {
-        proposal: proposal_info.id.to_owned(),
-    };
+    let choice_constraint =
+        if let Some(boosted_choice) = boost_info.params.eligibility.boosted_choice() {
+            format!("AND choice = {}", boosted_choice)
+        } else {
+            "".to_string()
+        };
 
-    let request_body = EveryVoteQuery::build_query(variables);
-    let query_results: GraphQLResponse<every_vote_query::ResponseData> = client
-        .expect("client should be here")
-        .post(HUB_URL.as_str())
-        .json(&request_body)
-        .send()
-        .await?
-        .json()
-        .await?;
+    println!("choice: {}", choice_constraint);
+    let query = format!(
+        "SELECT voter, vp, choice
+        FROM votes
+        WHERE proposal = '{}'
+        {}
+        ORDER BY vp DESC;",
+        proposal_info.id, choice_constraint
+    );
+    println!("query: {}", query);
 
-    let mut votes = query_results
-        .data
-        .ok_or("lottery: missing data from the hub")?
-        .votes
-        .ok_or("lottery: missing votes from the hub")?
+    let mut conn = pool.get_conn().await?;
+    let result: Vec<(String, f64, u32)> = conn.query(query).await?;
+    println!("result: {:?}", result);
+    conn.disconnect().await?;
+
+    let mut votes = result
         .into_iter()
-        .map(|v| {
-            let vote_data = v.ok_or("lottery: missing vote info from the hub")?;
-            let vote = VoteInfo {
-                voter: Address::from_str(&vote_data.voter)
-                    .map_err(|e| format!("lottery: {:?}", e))?,
-                voting_power: vote_data.vp.ok_or("missing vp from the hub")?,
-                choice: vote_data.choice,
-            };
-            Ok::<VoteInfo, ServerError>(vote)
+        .map(|(voter, vp, _)| {
+            Ok(Vote {
+                voter: Address::from_str(&voter)?,
+                voting_power: vp,
+            })
         })
-        .collect::<Result<Vec<VoteInfo>, _>>()?;
+        .collect::<Result<Vec<Vote>, ServerError>>()?;
 
-    if let Some(boosted_choice) = boost_info.params.eligibility.boosted_choice() {
-        votes.retain(|v| v.choice == boosted_choice);
-    }
-
-    // Every voter is eligible to the same reward!
+    // If there are not enough voters, then every voter is eligible to the same reward
     if votes.len() <= num_winners as usize {
+        println!("votes {}, winners: {}", votes.len(), num_winners);
         let prize = boost_info.pool_size / votes.len() as u32;
         return Ok(votes.into_iter().map(|v| (v.voter, prize)).collect());
     }
 
     if let Some(limit) = limit {
+        println!("adjusting");
         adjust_vote_weights(&mut votes, boost_info.decimals, proposal_info.score, limit)?;
     }
 
     let prize = boost_info.pool_size / num_winners;
+    println!("randao ?");
     let seed = get_randao_reveal(proposal_info.end).await?;
 
+    println!("draw winners");
     Ok(draw_winners(votes, seed, num_winners, prize))
 }
 
@@ -90,7 +91,7 @@ pub async fn cached_lottery_winners(
 // the voter will get 100% of the prize). Limit will be ignored if set to 0.
 // The array of `votes` is assumed to be sorted by voting power.
 fn adjust_vote_weights(
-    votes: &mut [VoteInfo],
+    votes: &mut [Vote],
     decimals: u8,
     score: f64,
     limit: u16,
@@ -148,7 +149,7 @@ fn adjust_vote_weights(
 }
 
 fn draw_winners(
-    votes: Vec<VoteInfo>,
+    votes: Vec<Vote>,
     seed: [u8; 32],
     num_winners: u32,
     prize: U256,
@@ -275,7 +276,7 @@ async fn get_randao_reveal(timestamp: u64) -> Result<[u8; 32], ServerError> {
 #[cfg(test)]
 mod test_draw_winners {
     use super::draw_winners;
-    use super::VoteInfo;
+    use super::Vote;
     use super::U256;
     use rand::Rng;
     use rand::SeedableRng;
@@ -283,11 +284,11 @@ mod test_draw_winners {
 
     #[test]
     fn test_randomness() {
-        let vote1 = VoteInfo {
+        let vote1 = Vote {
             voting_power: 99.0,
             ..Default::default()
         };
-        let vote2 = VoteInfo {
+        let vote2 = Vote {
             voting_power: 1.0,
             ..Default::default()
         };
@@ -313,15 +314,15 @@ mod test_draw_winners {
 
     #[test]
     fn select_two() {
-        let vote1 = VoteInfo {
+        let vote1 = Vote {
             voting_power: 98.0,
             ..Default::default()
         };
-        let vote2 = VoteInfo {
+        let vote2 = Vote {
             voting_power: 1.0,
             ..Default::default()
         };
-        let vote3 = VoteInfo {
+        let vote3 = Vote {
             voting_power: 1.0,
             ..Default::default()
         };
@@ -339,7 +340,7 @@ mod test_draw_winners {
     fn test_speed() {
         let votes = (0..1000000)
             .enumerate()
-            .map(|(i, _)| VoteInfo {
+            .map(|(i, _)| Vote {
                 voting_power: i as f64,
                 ..Default::default()
             })
@@ -359,16 +360,16 @@ mod test_draw_winners {
 #[cfg(test)]
 mod test_adjust_vote_weights {
     use super::adjust_vote_weights;
-    use super::VoteInfo;
+    use super::Vote;
 
     #[test]
     fn test_adjust_vote_weights_half() {
         let mut votes = vec![
-            VoteInfo {
+            Vote {
                 voting_power: 900.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 100.0,
                 ..Default::default()
             },
@@ -386,11 +387,11 @@ mod test_adjust_vote_weights {
     #[test]
     fn test_adjust_no_op() {
         let mut votes = vec![
-            VoteInfo {
+            Vote {
                 voting_power: 900.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 100.0,
                 ..Default::default()
             },
@@ -408,11 +409,11 @@ mod test_adjust_vote_weights {
     #[test]
     fn test_adjust_limit_zero() {
         let mut votes = vec![
-            VoteInfo {
+            Vote {
                 voting_power: 900.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 100.0,
                 ..Default::default()
             },
@@ -430,19 +431,19 @@ mod test_adjust_vote_weights {
     #[test]
     fn test_adjust_limit_fourty() {
         let mut votes = vec![
-            VoteInfo {
+            Vote {
                 voting_power: 10.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 10.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 1.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 1.0,
                 ..Default::default()
             },
@@ -462,15 +463,15 @@ mod test_adjust_vote_weights {
     #[test]
     fn test_adjust_limit_no_op_rounded() {
         let mut votes = vec![
-            VoteInfo {
+            Vote {
                 voting_power: 900.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 50.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 50.0,
                 ..Default::default()
             },
@@ -490,19 +491,19 @@ mod test_adjust_vote_weights {
     #[test]
     fn test_adjust_limit_rounded() {
         let mut votes = vec![
-            VoteInfo {
+            Vote {
                 voting_power: 800.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 100.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 50.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 50.0,
                 ..Default::default()
             },
@@ -523,31 +524,31 @@ mod test_adjust_vote_weights {
     #[test]
     fn test_adjust_vote_weights() {
         let mut votes = vec![
-            VoteInfo {
+            Vote {
                 voting_power: 458.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 200.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 180.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 150.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 5.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 4.0,
                 ..Default::default()
             },
-            VoteInfo {
+            Vote {
                 voting_power: 3.0,
                 ..Default::default()
             },

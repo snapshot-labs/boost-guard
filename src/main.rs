@@ -1,6 +1,7 @@
 use axum::routing::{get, post};
 use axum::{Extension, Router};
 use boost_guard::routes::{handle_create_vouchers, handle_get_rewards, handle_health};
+use mysql_async::Pool;
 use std::env;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -25,11 +26,19 @@ async fn main() {
 fn app() -> Router {
     dotenv().ok();
 
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let pool = Pool::new(database_url.as_str());
+
     let client = reqwest::Client::new();
+
     let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
     let wallet = ethers::signers::LocalWallet::from_str(&private_key)
         .expect("failed to create a local wallet");
-    let state = boost_guard::State { client, wallet };
+    let state = boost_guard::State {
+        client,
+        pool,
+        wallet,
+    };
 
     Router::new()
         .route("/create-vouchers", post(handle_create_vouchers))
@@ -53,16 +62,18 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    // TODO: those test use fixed proposals and voter addresses, but these change from time to time as we delete
-    // proposals from the hub... we should probably settle for a fixed proposal and voter address and use those
+    const WINNER: &str = "0xeF8305E140ac520225DAf050e2f71d5fBcC543e7";
+    const PROPOSAL_ID: &str = "0x9f71aae9f1444d97bd4291a15820bf3f5578edfa9c41b45277e97b1d997cecf1";
+    const BOOST_ID: &str = "4";
+    const CHAIN_ID: &str = "11155111";
+
     #[tokio::test]
     async fn test_create_vouchers() {
         let app = super::app();
         let query = QueryParams {
-            proposal_id: "0x5c4d271f77150458cb0265cd5b473dd970bb5fa1fe4e006775c52b94c8e363a1"
-                .to_string(),
-            voter_address: "0xc83A9e69012312513328992d454290be85e95101".to_string(),
-            boosts: vec![("0".to_string(), "1".to_string())],
+            proposal_id: PROPOSAL_ID.to_string(),
+            voter_address: WINNER.to_string(),
+            boosts: vec![(BOOST_ID.to_string(), CHAIN_ID.to_string())],
         };
 
         let response = app
@@ -83,7 +94,12 @@ mod tests {
             println!("ERROR: {}", String::from_utf8(bytes.to_vec()).unwrap());
             panic!();
         } else {
-            println!("OK: {:?}", response.unwrap());
+            let result = response.unwrap();
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].signature, "0x8e91dfd90ed6636c492af00a01435e0d29f7b770a02199d423cf4fae006868465cabcd2cbfa70612900cba371d52ccc63bc99ea96fd7891ce9770e28c0cce71f1b");
+            assert_eq!(result[0].reward, "10000000000000000");
+            assert_eq!(result[0].chain_id, CHAIN_ID);
+            assert_eq!(result[0].boost_id, BOOST_ID);
         }
     }
 
@@ -91,10 +107,9 @@ mod tests {
     async fn test_get_rewards() {
         let app = super::app();
         let query = QueryParams {
-            proposal_id: "0x5c4d271f77150458cb0265cd5b473dd970bb5fa1fe4e006775c52b94c8e363a1"
-                .to_string(),
-            voter_address: "0xc83A9e69012312513328992d454290be85e95101".to_string(),
-            boosts: vec![("0".to_string(), "1".to_string())],
+            proposal_id: PROPOSAL_ID.to_string(),
+            voter_address: WINNER.to_string(),
+            boosts: vec![(BOOST_ID.to_string(), CHAIN_ID.to_string())],
         };
 
         let response = app
@@ -115,7 +130,11 @@ mod tests {
             println!("ERROR: {}", String::from_utf8(bytes.to_vec()).unwrap());
             panic!();
         } else {
-            println!("OK: {:?}", response.unwrap());
+            let result = response.unwrap();
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].reward, "10000000000000000");
+            assert_eq!(result[0].chain_id, CHAIN_ID);
+            assert_eq!(result[0].boost_id, BOOST_ID);
         }
     }
 
@@ -123,10 +142,9 @@ mod tests {
     async fn test_get_lottery_winners() {
         let app = super::app();
         let query = GetLotteryWinnerQueryParams {
-            proposal_id: "0x9f71aae9f1444d97bd4291a15820bf3f5578edfa9c41b45277e97b1d997cecf1"
-                .to_string(),
-            boost_id: "4".to_string(),
-            chain_id: "11155111".to_string(),
+            proposal_id: PROPOSAL_ID.to_string(),
+            boost_id: BOOST_ID.to_string(),
+            chain_id: CHAIN_ID.to_string(),
         };
 
         let response = app
@@ -147,7 +165,13 @@ mod tests {
             println!("ERROR: {}", String::from_utf8(bytes.to_vec()).unwrap());
             panic!("failed test");
         } else {
-            println!("OK: {:?}", response.unwrap());
+            let result = response.unwrap();
+            assert_eq!(result.winners.len(), 1);
+            assert_eq!(
+                result.winners[0],
+                "0xef8305e140ac520225daf050e2f71d5fbcc543e7"
+            );
+            assert_eq!(result.prize, "10000000000000000");
         }
     }
 
