@@ -15,6 +15,7 @@ use durations::WEEK;
 use ethers::types::Address;
 use ethers::types::U256;
 use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
+use mysql_async::prelude::Queryable;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -88,14 +89,9 @@ pub async fn handle_get_lottery_winners(
     }
 
     if let DistributionType::Lottery(num_winners, limit) = boost_info.params.distribution {
-        let winners = cached_lottery_winners(
-            Some(&state.client),
-            &boost_info,
-            &proposal_info,
-            num_winners,
-            limit,
-        )
-        .await?;
+        let winners =
+            cached_lottery_winners(&state.pool, &boost_info, &proposal_info, num_winners, limit)
+                .await?;
 
         let response = GetLotteryWinnersResponse {
             winners: winners.keys().map(|a| format!("{a:?}")).collect(),
@@ -187,23 +183,6 @@ struct BoostQuery;
     response_derives = "Debug"
 )]
 struct ProposalQuery;
-
-type Any = usize;
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "src/graphql/hub_schema.graphql",
-    query_path = "src/graphql/vote_query.graphql",
-    response_derives = "Debug"
-)]
-struct VotesQuery;
-
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "src/graphql/hub_schema.graphql",
-    query_path = "src/graphql/every_vote_query.graphql",
-    response_derives = "Debug"
-)]
-pub struct EveryVoteQuery;
 
 // List of different types of strategies supported
 #[derive(Debug, Default)]
@@ -385,13 +364,28 @@ impl TryFrom<boost_query::BoostQueryBoostStrategyDistribution> for DistributionT
 }
 
 #[derive(Debug, Clone)]
-pub struct VoteInfo {
+pub struct Vote {
+    pub voter: Address,
+    pub voting_power: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct VoteWithChoice {
     pub voter: Address,
     pub voting_power: f64,
     pub choice: usize,
 }
 
-impl Default for VoteInfo {
+impl Default for Vote {
+    fn default() -> Self {
+        Self {
+            voter: Address::random(),
+            voting_power: 1.0,
+        }
+    }
+}
+
+impl Default for VoteWithChoice {
     fn default() -> Self {
         Self {
             voter: Address::random(),
@@ -477,7 +471,7 @@ async fn get_rewards_inner(
     }
 
     let vote_info =
-        get_vote_info(&state.client, &request.voter_address, &request.proposal_id).await?;
+        get_vote_info(&state.pool, &request.voter_address, &request.proposal_id).await?;
 
     let mut response = Vec::with_capacity(request.boosts.len());
     for (boost_id, chain_id) in request.boosts {
@@ -504,9 +498,7 @@ async fn get_rewards_inner(
         }
 
         let reward =
-            match get_user_reward(Some(&state.client), &boost_info, &proposal_info, &vote_info)
-                .await
-            {
+            match get_user_reward(&state.pool, &boost_info, &proposal_info, &vote_info).await {
                 Ok(reward) => reward,
                 Err(e) => {
                     eprintln!("{:?}", e);
@@ -582,77 +574,60 @@ async fn get_boost_info(
 #[cached(
     result = true,
     sync_writes = true,
-    type = "TimedSizedCache<String, VoteInfo>",
+    type = "TimedSizedCache<String, VoteWithChoice>",
     create = "{ TimedSizedCache::with_size_and_lifespan(2000, 3 * WEEK.as_secs()) }",
     convert = r#"{ format!("{}{}", voter_address, proposal_id) }"#
 )]
 async fn get_vote_info(
-    client: &reqwest::Client,
+    pool: &mysql_async::Pool,
     voter_address: &str,
     proposal_id: &str,
-) -> Result<VoteInfo, ServerError> {
-    let variables = votes_query::Variables {
-        voter: voter_address.to_string(),
-        proposal: proposal_id.to_string(),
-    };
+) -> Result<VoteWithChoice, ServerError> {
+    let mut conn = pool.get_conn().await?;
 
-    let request_body = VotesQuery::build_query(variables);
+    let query = format!(
+        "SELECT voter, vp, choice
+        FROM votes
+        WHERE proposal = '{}'
+        AND voter = '{}'
+        ORDER BY vp DESC;",
+        proposal_id, voter_address
+    );
 
-    let res = client
-        .post(HUB_URL.as_str())
-        .json(&request_body)
-        .send()
-        .await?;
-    let response_body: GraphQLResponse<votes_query::ResponseData> = res.json().await?;
-    let votes = response_body
-        .data
-        .ok_or("missing data from the hub")?
-        .votes
-        .ok_or("votes query: missing votes from the hub")?;
+    let (_voter, voting_power, choice): (String, f64, usize) = conn
+        .query_first(query)
+        .await?
+        .ok_or("could not find vote for voter and proposal in the database")?;
 
-    let vote = votes
-        .into_iter()
-        .next()
-        .ok_or("voter has not voted for this proposal")?
-        .ok_or("missing first vote from the hub?")?;
+    conn.disconnect().await?;
 
-    Ok(VoteInfo {
+    Ok(VoteWithChoice {
         voter: Address::from_str(voter_address)?,
-        voting_power: vote.vp.ok_or("missing vp from the hub")?,
-        choice: vote.choice,
+        voting_power,
+        choice,
     })
 }
 
 async fn get_user_reward(
-    client: Option<&reqwest::Client>,
+    pool: &mysql_async::Pool,
     boost_info: &BoostInfo,
     proposal_info: &ProposalInfo,
-    vote_info: &VoteInfo,
+    vote_info: &VoteWithChoice,
 ) -> Result<U256, ServerError> {
     match &boost_info.params.distribution {
         DistributionType::Even => {
             if let Some(boosted_choice) = boost_info.params.eligibility.boosted_choice() {
                 // Only count the number of votes that voted for the boosted choice
-                let num_votes = cached_num_votes(
-                    client.expect("client should be here"),
-                    boost_info,
-                    proposal_info,
-                    boosted_choice,
-                );
+                let num_votes = cached_num_votes(pool, boost_info, proposal_info, boosted_choice);
                 Ok(boost_info.pool_size / num_votes.await?)
             } else {
-                Ok(boost_info.pool_size / (U256::from(proposal_info.num_votes)))}
+                Ok(boost_info.pool_size / (U256::from(proposal_info.num_votes)))
             }
-        , // todo: votes
+        }
         DistributionType::Weighted(l) => {
             if let Some(limit) = l {
-                let rewards = cached_rewards(
-                    client.expect("client should be here"),
-                    boost_info,
-                    proposal_info,
-                    *limit,
-                )
-                .await?;
+                let rewards =
+                    cached_weighted_rewards(pool, boost_info, proposal_info, *limit).await?;
                 Ok(*rewards
                     .get(&vote_info.voter)
                     .expect("voter should appear in hashmap"))
@@ -666,8 +641,12 @@ async fn get_user_reward(
             }
         }
         DistributionType::Lottery(num_winners, limit) => {
-            let winners = cached_lottery_winners(client, boost_info, proposal_info, *num_winners, *limit).await?;
-            Ok(*winners.get(&vote_info.voter).ok_or("voter did not win this time!")?)
+            let winners =
+                cached_lottery_winners(pool, boost_info, proposal_info, *num_winners, *limit)
+                    .await?;
+            Ok(*winners
+                .get(&vote_info.voter)
+                .ok_or("voter did not win this time!")?)
         }
     }
 }
@@ -676,41 +655,34 @@ async fn get_user_reward(
 #[cached(
     result = true,
     sync_writes = true,
-    type = "TimedSizedCache<String, U256>",
+    type = "TimedSizedCache<String, u32>",
     create = "{ TimedSizedCache::with_size_and_lifespan(500, 3 * WEEK.as_secs()) }",
     convert = r#"{ format!("{}{}", _boost_info.id, _boost_info.chain_id) }"#
 )]
 async fn cached_num_votes(
-    client: &reqwest::Client,
+    pool: &mysql_async::Pool,
     _boost_info: &BoostInfo,
     proposal_info: &ProposalInfo,
     boosted_choice: usize,
-) -> Result<U256, ServerError> {
-    let variables = every_vote_query::Variables {
-        proposal: proposal_info.id.to_owned(),
-    };
-    let request_body = EveryVoteQuery::build_query(variables);
-    let query_results: GraphQLResponse<every_vote_query::ResponseData> = client
-        .post(HUB_URL.as_str())
-        .json(&request_body)
-        .send()
+) -> Result<u32, ServerError> {
+    let query = format!(
+        "
+        SELECT COUNT(*) AS total_votes
+        FROM votes
+        WHERE proposal = '{}'
+        AND choice = {};",
+        proposal_info.id, boosted_choice,
+    );
+
+    let mut conn = pool.get_conn().await?;
+    let (num_votes,): (i64,) = conn
+        .query_first(query)
         .await?
-        .json()
-        .await?;
+        .ok_or("failed to fetch number of votes from db")?;
 
-    let num_votes = query_results
-        .data
-        .ok_or("num_votes: missing data from the hub")?
-        .votes
-        .ok_or("num_votes: missing votes from the hub")?
-        .into_iter()
-        .map(|v| v.ok_or("missing vote info from the hub"))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|v| v.choice == boosted_choice)
-        .count();
+    conn.disconnect().await?;
 
-    Ok(U256::from(num_votes))
+    Ok(num_votes as u32)
 }
 
 #[cached(
@@ -730,54 +702,39 @@ fn cached_pow(decimals: u8) -> f64 {
     create = "{ TimedSizedCache::with_size_and_lifespan(100, 3 * WEEK.as_secs()) }",
     convert = r#"{ format!("{}{}", boost_info.id, boost_info.chain_id) }"#
 )]
-async fn cached_rewards(
-    client: &reqwest::Client,
+async fn cached_weighted_rewards(
+    pool: &mysql_async::Pool,
     boost_info: &BoostInfo,
     proposal_info: &ProposalInfo,
     limit: U256,
 ) -> Result<HashMap<Address, U256>, ServerError> {
-    let variables = every_vote_query::Variables {
-        proposal: proposal_info.id.to_owned(),
-    };
-    let request_body = EveryVoteQuery::build_query(variables);
-    let query_results: GraphQLResponse<every_vote_query::ResponseData> = client
-        .post(HUB_URL.as_str())
-        .json(&request_body)
-        .send()
-        .await?
-        .json()
-        .await?;
+    let mut conn = pool.get_conn().await?;
 
-    let mut votes: Vec<VoteInfo> = query_results
-        .data
-        .ok_or("rewards: missing data from the hub")?
-        .votes
-        .ok_or("rewards: missing votes from the hub")?
-        .into_iter()
-        .map(|v| {
-            if let Some(vote_info) = v {
-                let voter = Address::from_str(&vote_info.voter)?;
-                let voting_power = vote_info.vp.ok_or("missing vp from the hub")?;
-                Ok(VoteInfo {
-                    voter,
-                    voting_power,
-                    choice: vote_info.choice,
-                })
-            } else {
-                Err(ServerError::ErrorString(
-                    "missing vote info from the hub".to_string(),
-                ))
+    let choice_clause = if let BoostEligibility::Bribe(choice) = boost_info.params.eligibility {
+        format!("AND choice = {}", choice)
+    } else {
+        "".to_string()
+    };
+
+    let query = format!(
+        "SELECT voter, vp
+        FROM votes
+        WHERE proposal = '{}'
+        {}
+        ORDER BY vp DESC;",
+        proposal_info.id, choice_clause
+    );
+
+    let votes: Vec<Vote> = conn
+        .query_map(query, |(voter, vp): (String, f64)| {
+            let v = Address::from_str(voter.as_str()).expect("address is ill-formatted");
+
+            Vote {
+                voter: v,
+                voting_power: vp,
             }
         })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    // Filter by choice
-    if let BoostEligibility::Bribe(choice) = boost_info.params.eligibility {
-        votes = votes
-            .into_iter()
-            .filter(|v| v.choice == choice)
-            .collect::<Vec<_>>();
-    }
+        .await?;
 
     compute_rewards(
         votes,
@@ -789,14 +746,13 @@ async fn cached_rewards(
 }
 
 fn compute_rewards(
-    votes: Vec<VoteInfo>,
-    mut pool: U256,
+    votes: Vec<Vote>,
+    mut pool_size: U256,
     decimals: u8,
-    score_decimal: f64,
+    _score_decimal: f64,
     limit: U256,
 ) -> Result<HashMap<Address, U256>, ServerError> {
     let pow = cached_pow(decimals);
-    let mut score = U256::from((score_decimal * pow) as u128);
 
     // Ensure the vector is sorted
     if votes
@@ -806,17 +762,21 @@ fn compute_rewards(
         return Err(ServerError::ErrorString("votes are not sorted".to_string()));
     }
 
-    println!("Votes: , {:?}", votes);
-    println!("pool: {:?}, score: {:?}", pool, score);
-    println!("limit: {limit:?}");
+    // let mut score = U256::from((score_decimal * pow) as u128); // TODO: investigate why this value is incorrect
+    let mut score = votes.iter().fold(U256::from(0), |acc, vote_info| {
+        acc + U256::from((vote_info.voting_power * pow) as u128)
+    });
+
+    // TODO: optimize: we could check if the first voter reaches limit. If he doesn't, then we can simplify the computation.
+
     Ok(votes
         .into_iter()
         .map(|vote_info| {
             let vp = U256::from((vote_info.voting_power * pow) as u128);
-            let reward = vp * pool / score;
+            let reward = vp * pool_size / score;
             let actual_reward = std::cmp::min(reward, limit);
 
-            pool -= actual_reward;
+            pool_size -= actual_reward;
             score -= vp;
 
             (vote_info.voter, actual_reward)
@@ -872,25 +832,253 @@ fn validate_choice(choice: usize, boost_eligibility: BoostEligibility) -> Result
 }
 
 #[cfg(test)]
+#[cfg(feature = "expensive_tests")]
+mod test_cached_results {
+    use crate::routes::get_proposal_info;
+
+    use super::*;
+    use super::{CACHED_NUM_VOTES, CACHED_WEIGHTED_REWARDS};
+    use cached::Cached;
+    use dotenv::dotenv;
+    use ethers::types::{Address, U256};
+    use mysql_async::Pool;
+    use std::str::FromStr;
+
+    const ELIGIBLE_VOTERS: usize = 210_613;
+
+    #[tokio::test]
+    async fn test_num_voters() {
+        dotenv().ok();
+
+        let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        let pool = Pool::new(database_url.as_str());
+        let boost_info = Default::default();
+        let client = reqwest::Client::new();
+        let proposal_id = "0x11e9daab4e806cba220d5d6eae6be76f799f27ad20723d0aabedf0263ca2a28f";
+        let proposal_info = get_proposal_info(&client, proposal_id).await.unwrap();
+        let boosted_choice = 1;
+
+        let num_votes = cached_num_votes(&pool, &boost_info, &proposal_info, boosted_choice)
+            .await
+            .unwrap();
+
+        assert_eq!(num_votes as usize, ELIGIBLE_VOTERS);
+
+        assert!(CACHED_NUM_VOTES.lock().await.cache_hits() == Some(0));
+        let _ = cached_num_votes(&pool, &boost_info, &proposal_info, boosted_choice)
+            .await
+            .unwrap();
+        assert!(CACHED_NUM_VOTES.lock().await.cache_hits() == Some(1));
+    }
+
+    #[tokio::test]
+    async fn test_cached_weighted_rewards_bribed() {
+        dotenv().ok();
+
+        let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        let pool = Pool::new(database_url.as_str());
+        let limit = U256::from(10000000000000000000000_u128);
+        let proposal_id = "0x11e9daab4e806cba220d5d6eae6be76f799f27ad20723d0aabedf0263ca2a28f";
+        let boost_info = BoostInfo {
+            id: 1,
+            chain_id: U256::from(11155111),
+            strategy: BoostStrategy::Proposal,
+            params: BoostParams {
+                version: "1".to_string(),
+                proposal: proposal_id.to_string(),
+                eligibility: BoostEligibility::Bribe(1),
+                distribution: DistributionType::Weighted(Some(limit)),
+            },
+            pool_size: U256::from(10000000000000000000000_u128), // 10_000 * 10**18
+            decimals: 18,
+        };
+        let client = reqwest::Client::new();
+        let proposal_info = get_proposal_info(&client, proposal_id).await.unwrap();
+
+        let rewards = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+            .await
+            .unwrap();
+
+        // Ensure all reward is distributed
+        let sum: U256 = rewards.values().fold(U256::from(0), |acc, x| acc + x);
+        assert_eq!(sum, boost_info.pool_size);
+
+        // Ensure all eligible voters are rewarded
+        assert_eq!(rewards.len(), ELIGIBLE_VOTERS);
+
+        // Pick three values at random
+        assert_eq!(
+            *rewards
+                .get(&Address::from_str("0x0E457324f0c6125b20392341Cdeb7bf9bCB02322").unwrap())
+                .unwrap(),
+            U256::from(210367026718988690605_u128)
+        );
+        // User who voted No does not get rewarded
+        assert_eq!(
+            rewards.get(&Address::from_str("0xB9cF551E73bEC54332D76A7542FdacBb77BFA430").unwrap()),
+            None
+        );
+        assert_eq!(
+            *rewards
+                .get(&Address::from_str("0x31B6BE9b49974A66F1A2C3787B44E694AD13EC27").unwrap())
+                .unwrap(),
+            U256::from(14128175333414183359_u128)
+        );
+
+        let hits = CACHED_WEIGHTED_REWARDS.lock().await.cache_hits().unwrap();
+        let _ = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+            .await
+            .unwrap();
+        assert!(CACHED_WEIGHTED_REWARDS.lock().await.cache_hits() == Some(hits + 1));
+
+        // -------
+        // Now, a new boost that will reach the limit
+        // -------
+
+        let limit = U256::from(84466625025568633775_u128);
+        let proposal_id = "0x11e9daab4e806cba220d5d6eae6be76f799f27ad20723d0aabedf0263ca2a28f";
+        let boost_info = BoostInfo {
+            id: 2,
+            chain_id: U256::from(11155111),
+            strategy: BoostStrategy::Proposal,
+            params: BoostParams {
+                version: "1".to_string(),
+                proposal: proposal_id.to_string(),
+                eligibility: BoostEligibility::Bribe(1),
+                distribution: DistributionType::Weighted(Some(limit)),
+            },
+            pool_size: U256::from(10000000000000000000000_u128), // 10_000 * 10**18
+            decimals: 18,
+        };
+
+        let rewards = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+            .await
+            .unwrap();
+
+        // Ensure all reward is distributed
+        let sum: U256 = rewards.values().fold(U256::from(0), |acc, x| acc + x);
+        assert_eq!(sum, boost_info.pool_size);
+
+        // Ensure the biggest voter reaches the limit
+        assert_eq!(
+            *rewards
+                .get(&Address::from_str("0xe0dEDCDb5B5Ef2c82E4AdC60AACC23486A518357").unwrap())
+                .unwrap(),
+            limit
+        );
+
+        // Other voters should have a different reward
+        assert_eq!(
+            *rewards
+                .get(&Address::from_str("0x0E457324f0c6125b20392341Cdeb7bf9bCB02322").unwrap())
+                .unwrap(),
+            U256::from(84466625025568633775_u128)
+        );
+        // User who voted No does not get rewarded
+        assert_eq!(
+            rewards.get(&Address::from_str("0xB9cF551E73bEC54332D76A7542FdacBb77BFA430").unwrap()),
+            None
+        );
+        assert_eq!(
+            *rewards
+                .get(&Address::from_str("0x31B6BE9b49974A66F1A2C3787B44E694AD13EC27").unwrap())
+                .unwrap(),
+            U256::from(15514329941501828111_u128)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cached_weighted_rewards_incentivized() {
+        dotenv().ok();
+
+        let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        let pool = Pool::new(database_url.as_str());
+        let limit = U256::from(384012049357245359479_u128); // 394012049357245359479 is the reward for the first voter, with no limit. We simply go from 39 to 38.
+        let proposal_id = "0x11e9daab4e806cba220d5d6eae6be76f799f27ad20723d0aabedf0263ca2a28f";
+        let boost_info = BoostInfo {
+            id: 3,
+            chain_id: U256::from(11155111),
+            strategy: BoostStrategy::Proposal,
+            params: BoostParams {
+                version: "1".to_string(),
+                proposal: proposal_id.to_string(),
+                eligibility: BoostEligibility::Incentive,
+                distribution: DistributionType::Weighted(Some(limit)),
+            },
+            pool_size: U256::from(10000000000000000000000_u128), // 10_000 * 10**18
+            decimals: 18,
+        };
+        let client = reqwest::Client::new();
+        let proposal_info = get_proposal_info(&client, proposal_id).await.unwrap();
+
+        let rewards = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+            .await
+            .unwrap();
+
+        // Ensure all eligible voters are rewarded
+        assert_eq!(rewards.len(), 237_573); // all voters are eligible
+
+        // Ensure all reward is distributed
+        let sum: U256 = rewards.values().fold(U256::from(0), |acc, x| acc + x);
+        assert_eq!(sum, boost_info.pool_size);
+
+        // Ensure first voter hits the reward limit
+        assert_eq!(
+            *rewards
+                .get(&Address::from_str("0xe0dEDCDb5B5Ef2c82E4AdC60AACC23486A518357").unwrap())
+                .unwrap(),
+            limit,
+        );
+
+        // Pick three values at random
+        assert_eq!(
+            *rewards
+                .get(&Address::from_str("0x0E457324f0c6125b20392341Cdeb7bf9bCB02322").unwrap())
+                .unwrap(),
+            U256::from(196464414774155419006_u128)
+        );
+        // User who voted no still gets rewarded
+        assert_eq!(
+            *rewards
+                .get(&Address::from_str("0xB9cF551E73bEC54332D76A7542FdacBb77BFA430").unwrap())
+                .unwrap(),
+            U256::from(27718149939250144849_u128)
+        );
+        assert_eq!(
+            *rewards
+                .get(&Address::from_str("0x31B6BE9b49974A66F1A2C3787B44E694AD13EC27").unwrap())
+                .unwrap(),
+            U256::from(13194480817631529200_u128)
+        );
+
+        let hits = CACHED_WEIGHTED_REWARDS.lock().await.cache_hits().unwrap();
+        let _ = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+            .await
+            .unwrap();
+        assert!(CACHED_WEIGHTED_REWARDS.lock().await.cache_hits() == Some(hits + 1));
+    }
+}
+
+#[cfg(test)]
 mod test_compute_rewards {
     use crate::ServerError;
 
-    use super::{compute_rewards, VoteInfo};
+    use super::{compute_rewards, Vote};
     use ethers::types::{Address, U256};
 
     #[test]
     fn test_compute_rewards_unsorted() {
         let decimals = 18u8;
         let pow = 10f64.powi(decimals as i32);
-        let user1 = VoteInfo {
+        let user1 = Vote {
             voting_power: 1.0,
             ..Default::default()
         };
-        let user2 = VoteInfo {
+        let user2 = Vote {
             voting_power: 3.0,
             ..Default::default()
         };
-        let user3 = VoteInfo {
+        let user3 = Vote {
             voting_power: 2.0,
             ..Default::default()
         };
@@ -929,10 +1117,9 @@ mod test_compute_rewards {
     fn test_compute_rewards_single() {
         let decimals = 18u8;
         let pow = 10f64.powi(decimals as i32);
-        let user1 = VoteInfo {
+        let user1 = Vote {
             voter: Address::random(),
             voting_power: 91.0,
-            choice: 1,
         };
         let query_results = vec![user1.clone()];
 
@@ -948,47 +1135,48 @@ mod test_compute_rewards {
     }
 
     #[test]
-    fn test_compute_rewards_five() {
-        // user1: 25 vp
-        // user2: 20 vp
-        // user3: 15 vp
-        // user4: 1 vp
-        // user5: 0.5 vp
+    fn test_compute_rewards_six() {
+        // user1: 38.5 vp
+        // user2: 25 vp
+        // user3: 20 vp
+        // user4: 15 vp
+        // user5: 1 vp
+        // user6: 0.5 vp
         //
         // limit: 10
         // pool: 200
         // score: 100
         //
         // rewards:
-        // user1: 25 * 200 /100 > limit => 10
-        // user2: 20 * 190 / 75 > limit => 10
-        // user3: 15 * 180 / 55 > limit => 10
-        // user4: 1 * 170 / 40 > limit => 4.25
-        // user5: 0.5 * 165.75 / 39 = 2.125
-        let user1 = VoteInfo {
+        // user1: 38.5 * 200 / 100 > limit => 10
+        // user2: 25 * 190 / 61.5 > limit => 10
+        // user3: 20 * 180 / 36.5 > limit => 10
+        // user4: 15 * 170 / 16.5 > limit => 10
+        // user5: 1 * 160 / 1.5 > limit => 10
+        // user6: 0.5 * 150 / 0.5 > limit => 10
+        let user1 = Vote {
+            voter: Address::random(),
+            voting_power: 38.5,
+        };
+        let user2 = Vote {
             voter: Address::random(),
             voting_power: 25.0,
-            choice: 1,
         };
-        let user2 = VoteInfo {
+        let user3 = Vote {
             voter: Address::random(),
             voting_power: 20.0,
-            choice: 1,
         };
-        let user3 = VoteInfo {
+        let user4 = Vote {
             voter: Address::random(),
             voting_power: 15.0,
-            choice: 1,
         };
-        let user4 = VoteInfo {
+        let user5 = Vote {
             voter: Address::random(),
             voting_power: 1.0,
-            choice: 1,
         };
-        let user5 = VoteInfo {
+        let user6 = Vote {
             voter: Address::random(),
             voting_power: 0.5,
-            choice: 1,
         };
         let decimals = 18u8;
         let pow = 10f64.powi(decimals as i32);
@@ -998,26 +1186,23 @@ mod test_compute_rewards {
             user3.clone(),
             user4.clone(),
             user5.clone(),
+            user6.clone(),
         ];
 
         let score_decimal = 100.0;
         let pool_decimal = 200.0;
-        let pool = U256::from((pool_decimal * pow) as u128);
+        let pool_size = U256::from((pool_decimal * pow) as u128);
         let reward_limit_decimal = 10.0;
         let limit = U256::from((reward_limit_decimal * pow) as u128);
 
-        let rewards = compute_rewards(query_results, pool, decimals, score_decimal, limit).unwrap();
+        let rewards =
+            compute_rewards(query_results, pool_size, decimals, score_decimal, limit).unwrap();
+
         assert_eq!(*rewards.get(&user1.voter).unwrap(), limit);
         assert_eq!(*rewards.get(&user2.voter).unwrap(), limit);
         assert_eq!(*rewards.get(&user3.voter).unwrap(), limit);
-        assert_eq!(
-            *rewards.get(&user4.voter).unwrap(),
-            U256::from((4.25 * pow) as u128)
-        );
-        assert_eq!(
-            *rewards.get(&user5.voter).unwrap(),
-            U256::from((2.125 * pow) as u128)
-        );
+        assert_eq!(*rewards.get(&user4.voter).unwrap(), limit);
+        assert_eq!(*rewards.get(&user5.voter).unwrap(), limit,);
     }
 
     #[test]
@@ -1028,20 +1213,17 @@ mod test_compute_rewards {
         //
         // limit: 40
         // pool: 200
-        let user1 = VoteInfo {
+        let user1 = Vote {
             voter: Address::random(),
             voting_power: 90.0,
-            choice: 1,
         };
-        let user2 = VoteInfo {
+        let user2 = Vote {
             voter: Address::random(),
             voting_power: 9.0,
-            choice: 1,
         };
-        let user3 = VoteInfo {
+        let user3 = Vote {
             voter: Address::random(),
             voting_power: 1.0,
-            choice: 1,
         };
 
         let decimals = 18u8;
@@ -1049,12 +1231,13 @@ mod test_compute_rewards {
         let query_results = vec![user1.clone(), user2.clone(), user3.clone()];
 
         let score_decimal = 100.0;
-        let pool_decimal = 200.0;
-        let pool = U256::from((pool_decimal * pow) as u128);
+        let pool_size_decimal = 200.0;
+        let pool_size = U256::from((pool_size_decimal * pow) as u128);
         let reward_limit_decimal = 40.0;
         let limit = U256::from((reward_limit_decimal * pow) as u128);
 
-        let rewards = compute_rewards(query_results, pool, decimals, score_decimal, limit).unwrap();
+        let rewards =
+            compute_rewards(query_results, pool_size, decimals, score_decimal, limit).unwrap();
         assert_eq!(*rewards.get(&user1.voter).unwrap(), limit);
         assert_eq!(*rewards.get(&user2.voter).unwrap(), limit);
         assert_eq!(*rewards.get(&user3.voter).unwrap(), limit);
@@ -1065,7 +1248,7 @@ mod test_compute_rewards {
 mod test_compute_user_reward {
     use super::BoostParams;
     use super::{get_user_reward, DistributionType};
-    use super::{BoostInfo, ProposalInfo, VoteInfo};
+    use super::{BoostInfo, ProposalInfo, VoteWithChoice};
     use ethers::types::U256;
 
     #[tokio::test]
@@ -1087,12 +1270,13 @@ mod test_compute_user_reward {
             num_votes,
             ..Default::default()
         };
-        let vote_info = VoteInfo {
+        let vote_info = VoteWithChoice {
             voting_power,
             ..Default::default()
         };
+        let pool = mysql_async::Pool::new("mysql://username:password@toto:3306/db");
 
-        let reward = get_user_reward(None, &boost_info, &proposal_info, &vote_info)
+        let reward = get_user_reward(&pool, &boost_info, &proposal_info, &vote_info)
             .await
             .unwrap();
 
@@ -1121,19 +1305,21 @@ mod test_compute_user_reward {
         let voting_power1 = 10.0;
         let voting_power2 = 20.0;
 
-        let vote_info1 = VoteInfo {
+        let vote_info1 = VoteWithChoice {
             voting_power: voting_power1,
             ..Default::default()
         };
-        let vote_info2 = VoteInfo {
+        let vote_info2 = VoteWithChoice {
             voting_power: voting_power2,
             ..Default::default()
         };
 
-        let reward1 = get_user_reward(None, &boost_info, &proposal_info, &vote_info1)
+        let pool = mysql_async::Pool::new("mysql://username:password@toto:3306/db");
+
+        let reward1 = get_user_reward(&pool, &boost_info, &proposal_info, &vote_info1)
             .await
             .unwrap();
-        let reward2 = get_user_reward(None, &boost_info, &proposal_info, &vote_info2)
+        let reward2 = get_user_reward(&pool, &boost_info, &proposal_info, &vote_info2)
             .await
             .unwrap();
 
@@ -1164,26 +1350,28 @@ mod test_compute_user_reward {
         let voting_power2 = 20.0;
         let voting_power3 = 30.0;
 
-        let vote_info1 = VoteInfo {
+        let vote_info1 = VoteWithChoice {
             voting_power: voting_power1,
             ..Default::default()
         };
-        let vote_info2 = VoteInfo {
+        let vote_info2 = VoteWithChoice {
             voting_power: voting_power2,
             ..Default::default()
         };
-        let vote_info3 = VoteInfo {
+        let vote_info3 = VoteWithChoice {
             voting_power: voting_power3,
             ..Default::default()
         };
 
-        let reward1 = get_user_reward(None, &boost_info, &proposal_info, &vote_info1)
+        let pool = mysql_async::Pool::new("mysql://username:password@toto:3306/db"); // random
+
+        let reward1 = get_user_reward(&pool, &boost_info, &proposal_info, &vote_info1)
             .await
             .unwrap();
-        let reward2 = get_user_reward(None, &boost_info, &proposal_info, &vote_info2)
+        let reward2 = get_user_reward(&pool, &boost_info, &proposal_info, &vote_info2)
             .await
             .unwrap();
-        let reward3 = get_user_reward(None, &boost_info, &proposal_info, &vote_info3)
+        let reward3 = get_user_reward(&pool, &boost_info, &proposal_info, &vote_info3)
             .await
             .unwrap();
 
@@ -1215,26 +1403,28 @@ mod test_compute_user_reward {
         let voting_power2 = 20.0;
         let voting_power3 = 30.0;
 
-        let vote_info1 = VoteInfo {
+        let vote_info1 = VoteWithChoice {
             voting_power: voting_power1,
             ..Default::default()
         };
-        let vote_info2 = VoteInfo {
+        let vote_info2 = VoteWithChoice {
             voting_power: voting_power2,
             ..Default::default()
         };
-        let vote_info3 = VoteInfo {
+        let vote_info3 = VoteWithChoice {
             voting_power: voting_power3,
             ..Default::default()
         };
 
-        let reward1 = get_user_reward(None, &boost_info, &proposal_info, &vote_info1)
+        let pool = mysql_async::Pool::new("mysql://username:password@toto:3306/db");
+
+        let reward1 = get_user_reward(&pool, &boost_info, &proposal_info, &vote_info1)
             .await
             .unwrap();
-        let reward2 = get_user_reward(None, &boost_info, &proposal_info, &vote_info2)
+        let reward2 = get_user_reward(&pool, &boost_info, &proposal_info, &vote_info2)
             .await
             .unwrap();
-        let reward3 = get_user_reward(None, &boost_info, &proposal_info, &vote_info3)
+        let reward3 = get_user_reward(&pool, &boost_info, &proposal_info, &vote_info3)
             .await
             .unwrap();
 

@@ -88,5 +88,6 @@ impl IntoResponse for ServerError {
 #[derive(Debug, Clone)]
 pub struct State {
     pub client: reqwest::Client,
+    pub pool: mysql_async::Pool,
     pub wallet: ethers::signers::LocalWallet,
 }
