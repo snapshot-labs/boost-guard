@@ -12,6 +12,7 @@ use cached::proc_macro::cached;
 use cached::Cached;
 use cached::{SizedCache, TimedSizedCache};
 use durations::WEEK;
+use ethers::signers::Signer;
 use ethers::types::Address;
 use ethers::types::U256;
 use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
@@ -21,6 +22,27 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::SystemTime;
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct GuardInfoResponse {
+    pub guard_address: Address,
+    pub version: String,
+    pub name: String,
+}
+
+pub async fn handle_root(
+    Extension(state): Extension<State>,
+) -> Result<impl IntoResponse, ServerError> {
+    let guard_address = state.wallet.address();
+    let version = env!("CARGO_PKG_VERSION");
+    let name = env!("CARGO_PKG_NAME");
+
+    Ok(Json(GuardInfoResponse {
+        guard_address,
+        version: version.to_string(),
+        name: name.to_string(),
+    }))
+}
 
 pub async fn handle_create_vouchers(
     Extension(state): Extension<State>,

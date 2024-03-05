@@ -1,6 +1,6 @@
 use axum::routing::{get, post};
 use axum::{Extension, Router};
-use boost_guard::routes::{handle_create_vouchers, handle_get_rewards, handle_health};
+use boost_guard::routes::{handle_create_vouchers, handle_get_rewards, handle_health, handle_root};
 use mysql_async::Pool;
 use std::env;
 use std::net::SocketAddr;
@@ -48,6 +48,7 @@ fn app() -> Router {
             post(boost_guard::routes::handle_get_lottery_winners),
         )
         .route("/health", get(handle_health))
+        .route("/", get(handle_root))
         .layer(Extension(state))
 }
 
@@ -57,7 +58,7 @@ mod tests {
     use axum::http;
     use boost_guard::routes::{
         CreateVouchersResponse, GetLotteryWinnerQueryParams, GetLotteryWinnersResponse,
-        GetRewardsResponse, QueryParams,
+        GetRewardsResponse, GuardInfoResponse, QueryParams,
     };
     use http_body_util::BodyExt;
     use tower::ServiceExt;
@@ -189,5 +190,28 @@ mod tests {
             .await
             .unwrap();
         assert!(response.status() == http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_root() {
+        let app = super::app();
+        let response = app
+            .oneshot(
+                http::Request::builder()
+                    .method(http::Method::GET)
+                    .uri("/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(response.status() == http::StatusCode::OK);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let response: GuardInfoResponse = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            format!("{:?}", response.guard_address),
+            "0x06a85356dcb5b307096726fb86a78c59d38e08ee"
+        );
     }
 }
