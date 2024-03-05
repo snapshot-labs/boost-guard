@@ -209,6 +209,9 @@ mod tests {
         assert!(response.status() == http::StatusCode::OK);
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
         let response: GuardInfoResponse = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(format!("{:?}", response.guard_address), "0x06a85356dcb5b307096726fb86a78c59d38e08ee");
+        assert_eq!(
+            format!("{:?}", response.guard_address),
+            "0x06a85356dcb5b307096726fb86a78c59d38e08ee"
+        );
     }
 }
