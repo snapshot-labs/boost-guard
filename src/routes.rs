@@ -18,9 +18,26 @@ use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
 use mysql_async::prelude::Queryable;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use ethers::signers::Signer;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::SystemTime;
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct GuardInfoResponse {
+    pub guard_address: Address,
+    pub version: String,
+}
+
+pub async fn handle_root(Extension(state): Extension<State>) -> Result<impl IntoResponse, ServerError> {
+    let guard_address = state.wallet.address();
+    let version = env!("CARGO_PKG_VERSION");
+
+    Ok(Json(GuardInfoResponse {
+        guard_address,
+        version: version.to_string(),
+    }))
+}
 
 pub async fn handle_create_vouchers(
     Extension(state): Extension<State>,
