@@ -19,7 +19,6 @@ use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
 use mysql_async::prelude::Queryable;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::SystemTime;
 
@@ -652,11 +651,7 @@ async fn get_user_reward(
         }
         DistributionType::Weighted(l) => {
             if let Some(limit) = l {
-                let rewards =
-                    cached_weighted_rewards(pool, boost_info, proposal_info, *limit).await?;
-                Ok(*rewards
-                    .get(&vote_info.voter)
-                    .expect("voter should appear in hashmap"))
+                get_weighted_reward(pool, boost_info, proposal_info, vote_info, *limit).await
             } else {
                 let pow = cached_pow(boost_info.decimals);
                 let score = U256::from(
@@ -720,20 +715,51 @@ fn cached_pow(decimals: u8) -> f64 {
     10f64.powi(decimals as i32)
 }
 
+async fn get_weighted_reward(
+    pool: &mysql_async::Pool,
+    boost_info: &BoostInfo,
+    proposal_info: &ProposalInfo,
+    vote_info: &VoteWithChoice,
+    limit: U256,
+) -> Result<U256, ServerError> {
+    let cached_values =
+        cached_weighted_rewards_ratio(pool, boost_info, proposal_info, limit).await?;
+
+    Ok(get_reward_from_cached_values(
+        cached_values,
+        vote_info.voting_power,
+        boost_info.decimals,
+        limit,
+    ))
+}
+
+fn get_reward_from_cached_values(
+    cached_values: (U256, U256),
+    voting_power: f64,
+    decimals: u8,
+    limit: U256,
+) -> U256 {
+    let pow = cached_pow(decimals);
+    let vp = U256::from((voting_power * pow) as u128);
+    let (cached_vp, cached_reward) = cached_values;
+
+    std::cmp::min(vp * cached_reward / cached_vp, limit)
+}
+
 // LRU cache that uses `boost_id` and `chain_id` as keys
 #[cached(
     result = true,
     sync_writes = true,
-    type = "TimedSizedCache<String, HashMap<Address, U256>>",
+    type = "TimedSizedCache<String, (U256, U256)>",
     create = "{ TimedSizedCache::with_size_and_lifespan(100, 3 * WEEK.as_secs()) }",
     convert = r#"{ format!("{}{}", boost_info.id, boost_info.chain_id) }"#
 )]
-async fn cached_weighted_rewards(
+async fn cached_weighted_rewards_ratio(
     pool: &mysql_async::Pool,
     boost_info: &BoostInfo,
     proposal_info: &ProposalInfo,
     limit: U256,
-) -> Result<HashMap<Address, U256>, ServerError> {
+) -> Result<(U256, U256), ServerError> {
     let mut conn = pool.get_conn().await?;
 
     let choice_clause = if let BoostEligibility::Bribe(choice) = boost_info.params.eligibility {
@@ -777,7 +803,7 @@ fn compute_rewards(
     decimals: u8,
     _score_decimal: f64,
     limit: U256,
-) -> Result<HashMap<Address, U256>, ServerError> {
+) -> Result<(U256, U256), ServerError> {
     let pow = cached_pow(decimals);
 
     // Ensure the vector is sorted
@@ -795,19 +821,23 @@ fn compute_rewards(
 
     // TODO: optimize: we could check if the first voter reaches limit. If he doesn't, then we can simplify the computation.
 
-    Ok(votes
-        .into_iter()
-        .map(|vote_info| {
-            let vp = U256::from((vote_info.voting_power * pow) as u128);
-            let reward = vp * pool_size / score;
-            let actual_reward = std::cmp::min(reward, limit);
+    let mut values = (U256::from(1), U256::from(0));
+    for vote in votes.into_iter() {
+        let vp = U256::from((vote.voting_power * pow) as u128);
+        let reward = vp * pool_size / score;
+        let actual_reward = std::cmp::min(reward, limit);
 
-            pool_size -= actual_reward;
-            score -= vp;
+        pool_size -= actual_reward;
+        score -= vp;
 
-            (vote_info.voter, actual_reward)
-        })
-        .collect())
+        values = (vp, actual_reward);
+
+        if actual_reward < limit {
+            break;
+        }
+    }
+
+    Ok(values)
 }
 
 fn validate_proposal_info(proposal_info: &ProposalInfo) -> Result<(), ServerError> {
@@ -1087,7 +1117,7 @@ mod test_cached_results {
 
 #[cfg(test)]
 mod test_compute_rewards {
-    use crate::ServerError;
+    use crate::{routes::get_reward_from_cached_values, ServerError};
 
     use super::{compute_rewards, Vote};
     use ethers::types::{Address, U256};
@@ -1131,12 +1161,16 @@ mod test_compute_rewards {
 
         let score_decimal = 100.0;
         let pool_decimal = 200.0;
-        let pool = U256::from((pool_decimal * pow) as u128);
+        let pool_size = U256::from((pool_decimal * pow) as u128);
         let reward_limit_decimal = 110.0;
         let limit = U256::from((reward_limit_decimal * pow) as u128);
 
-        let rewards = compute_rewards(query_results, pool, decimals, score_decimal, limit).unwrap();
-        assert!(rewards.is_empty());
+        let cached_values =
+            compute_rewards(query_results, pool_size, decimals, score_decimal, limit).unwrap();
+        assert_eq!(
+            get_reward_from_cached_values(cached_values, 0.0, decimals, limit),
+            U256::from(0)
+        );
     }
 
     #[test]
@@ -1151,13 +1185,16 @@ mod test_compute_rewards {
 
         let score_decimal = 100.0;
         let pool_decimal = 200.0;
-        let pool = U256::from((pool_decimal * pow) as u128);
+        let pool_size = U256::from((pool_decimal * pow) as u128);
         let reward_limit_decimal = 110.0;
         let limit = U256::from((reward_limit_decimal * pow) as u128);
 
-        let rewards = compute_rewards(query_results, pool, decimals, score_decimal, limit).unwrap();
-        assert!(rewards.len() == 1);
-        assert_eq!(*rewards.get(&user1.voter).unwrap(), limit);
+        let cached_values =
+            compute_rewards(query_results, pool_size, decimals, score_decimal, limit).unwrap();
+        assert_eq!(
+            get_reward_from_cached_values(cached_values, user1.voting_power, decimals, limit),
+            limit
+        );
     }
 
     #[test]
@@ -1221,14 +1258,28 @@ mod test_compute_rewards {
         let reward_limit_decimal = 10.0;
         let limit = U256::from((reward_limit_decimal * pow) as u128);
 
-        let rewards =
+        let cached_values =
             compute_rewards(query_results, pool_size, decimals, score_decimal, limit).unwrap();
-
-        assert_eq!(*rewards.get(&user1.voter).unwrap(), limit);
-        assert_eq!(*rewards.get(&user2.voter).unwrap(), limit);
-        assert_eq!(*rewards.get(&user3.voter).unwrap(), limit);
-        assert_eq!(*rewards.get(&user4.voter).unwrap(), limit);
-        assert_eq!(*rewards.get(&user5.voter).unwrap(), limit,);
+        assert_eq!(
+            get_reward_from_cached_values(cached_values, user1.voting_power, decimals, limit),
+            limit
+        );
+        assert_eq!(
+            get_reward_from_cached_values(cached_values, user2.voting_power, decimals, limit),
+            limit
+        );
+        assert_eq!(
+            get_reward_from_cached_values(cached_values, user3.voting_power, decimals, limit),
+            limit
+        );
+        assert_eq!(
+            get_reward_from_cached_values(cached_values, user4.voting_power, decimals, limit),
+            limit
+        );
+        assert_eq!(
+            get_reward_from_cached_values(cached_values, user5.voting_power, decimals, limit),
+            limit
+        );
     }
 
     #[test]
@@ -1262,11 +1313,21 @@ mod test_compute_rewards {
         let reward_limit_decimal = 40.0;
         let limit = U256::from((reward_limit_decimal * pow) as u128);
 
-        let rewards =
+        let cached_values =
             compute_rewards(query_results, pool_size, decimals, score_decimal, limit).unwrap();
-        assert_eq!(*rewards.get(&user1.voter).unwrap(), limit);
-        assert_eq!(*rewards.get(&user2.voter).unwrap(), limit);
-        assert_eq!(*rewards.get(&user3.voter).unwrap(), limit);
+
+        assert_eq!(
+            get_reward_from_cached_values(cached_values, user1.voting_power, decimals, limit),
+            limit
+        );
+        assert_eq!(
+            get_reward_from_cached_values(cached_values, user2.voting_power, decimals, limit),
+            limit
+        );
+        assert_eq!(
+            get_reward_from_cached_values(cached_values, user3.voting_power, decimals, limit),
+            limit
+        );
     }
 }
 
