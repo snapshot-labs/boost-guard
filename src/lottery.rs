@@ -50,6 +50,10 @@ pub async fn cached_lottery_winners(
     let mut conn = pool.get_conn().await?;
     let result: Vec<(String, f64, u32)> = conn.query(query).await?;
     conn.disconnect().await?;
+    
+    if result.is_empty() {
+        return Err("no eligibles votes found")?;
+    }
 
     let mut votes = result
         .into_iter()
