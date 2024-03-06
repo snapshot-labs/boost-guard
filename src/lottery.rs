@@ -52,7 +52,7 @@ pub async fn cached_lottery_winners(
     conn.disconnect().await?;
     
     if result.is_empty() {
-        return Err("no eligibles votes found")?;
+        return Err("no eligible votes found")?;
     }
 
     let mut votes = result
