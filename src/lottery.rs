@@ -52,7 +52,7 @@ pub async fn cached_lottery_winners(
     conn.disconnect().await?;
 
     if result.is_empty() {
-        return Err("no eligible votes found")?;
+        return Ok(HashMap::new());
     }
 
     let mut votes = result
