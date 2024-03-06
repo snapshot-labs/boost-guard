@@ -117,7 +117,11 @@ pub async fn handle_get_lottery_winners(
 
         let response = GetLotteryWinnersResponse {
             winners: winners.keys().map(|a| format!("{a:?}")).collect(),
-            prize: winners.values().next().unwrap().to_string(),
+            prize: winners
+                .values()
+                .next()
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| "0".to_string()),
             chain_id: request.chain_id.to_string(),
             boost_id: request.boost_id.to_string(),
         };
