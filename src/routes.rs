@@ -461,6 +461,15 @@ impl TryFrom<proposal_query::ProposalQueryProposal> for ProposalInfo {
             .ok_or("proposal: missing votes from the hub")?
             .try_into()
             .map_err(|_| ServerError::ErrorString("failed to parse votes".to_string()))?;
+        let privacy: String = proposal
+            .privacy
+            .ok_or("missing proposal privacy from the hub")?;
+        if !privacy.is_empty() {
+            return Err(ServerError::ErrorString(format!(
+                "proposal privacy {} is incompatible",
+                privacy
+            )));
+        }
 
         Ok(ProposalInfo {
             id,

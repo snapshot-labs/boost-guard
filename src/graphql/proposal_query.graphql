@@ -5,6 +5,7 @@ query ProposalQuery($id: String!) {
     id
     choices
     end
+    privacy
     scores
     scores_total
     snapshot
