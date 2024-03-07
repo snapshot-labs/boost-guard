@@ -24,7 +24,7 @@ ENV SEPOLIA_SUBGRAPH_URL "https://api.studio.thegraph.com/query/23545/boost-sepo
 ENV MAINNET_SUBGRAPH_URL "https://api.studio.thegraph.com/query/23545/boost/version/latest"
 ENV BOOST_NAME "boost"
 ENV BOOST_VERSION "0.1.0"
-ENV VERIFYING_CONTRACT "0xc8Ae580637bf91b7E2c0A8cf369Fb24e0253cA5a"
+ENV VERIFYING_CONTRACT "0x8E8913197114c911F13cfBfCBBD138C1DC74B964"
 ENV SLOT_URL "https://beaconcha.in/api/v1/slot/"
 ENV EPOCH_URL "https://beaconcha.in/api/v1/epoch/"
 

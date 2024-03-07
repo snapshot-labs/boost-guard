@@ -102,7 +102,7 @@ mod tests {
         } else {
             let result = response.unwrap();
             assert_eq!(result.len(), 1);
-            assert_eq!(result[0].signature, "0xd64db19f06886edf57e712abeb5ab55f3c30f4849bda1ead31018f85979310c711d1a3e8e298868f62ec054d0382d89f34ed64b6cdb048a5bed0ac0b99e14b121c");
+            assert_eq!(result[0].signature, "0x3099eca443b11fbcc85e0e5a772eb0276aceb2060d440edce2474b8bb5e28ce0727180bf08b88030bb0d5ed7592dd36b2c42622777cb485cfa47baae321772eb1c");
             assert_eq!(result[0].reward, "10000000000000000");
             assert_eq!(result[0].chain_id, CHAIN_ID);
             assert_eq!(result[0].boost_id, BOOST_ID);
