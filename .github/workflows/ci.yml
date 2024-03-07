@@ -1,13 +1,13 @@
 name: CI
 env:
-  PRIVATE_KEY: '0xafdfd9c3d2095ef696594f6cedcae59e72dcd697e2a7521b1578140422a4f890' # This is a test private key
+  PRIVATE_KEY: "0xafdfd9c3d2095ef696594f6cedcae59e72dcd697e2a7521b1578140422a4f890" # This is a test private key
   TESTNET_HUB_URL: "https://testnet.hub.snapshot.org/graphql"
   HUB_URL: "https://hub.snapshot.org/graphql"
   SEPOLIA_SUBGRAPH_URL: "https://api.studio.thegraph.com/query/23545/boost-sepolia/version/latest"
   MAINNET_SUBGRAPH_URL: "https://api.studio.thegraph.com/query/23545/boost/version/latest"
   BOOST_NAME: "boost"
   BOOST_VERSION: "0.1.0"
-  VERIFYING_CONTRACT: "0xc8Ae580637bf91b7E2c0A8cf369Fb24e0253cA5a"
+  VERIFYING_CONTRACT: "0x8E8913197114c911F13cfBfCBBD138C1DC74B964"
   SLOT_URL: "https://beaconcha.in/api/v1/slot/"
   EPOCH_URL: "https://beaconcha.in/api/v1/epoch/"
   BEACONCHAIN_API_KEY: ${{ secrets.BEACONCHAIN_API_KEY }}
@@ -21,7 +21,6 @@ on:
       - main
       - master
   pull_request:
-
 
 jobs:
   lint:
@@ -38,7 +37,7 @@ jobs:
         run: |
           cargo --version --verbose
           rustc --version
-          cargo clippy --version          
+          cargo clippy --version
 
       - name: Lint
         run: |
@@ -62,7 +61,7 @@ jobs:
       - name: Test
         run: |
           cargo check
-          cargo test --all          
+          cargo test --all
 
   build:
     runs-on: ubuntu-latest
