@@ -26,6 +26,11 @@ async fn main() {
 fn app() -> Router {
     dotenv().ok();
 
+    // construct a subscriber that prints formatted traces to stdout
+    let subscriber = tracing_subscriber::FmtSubscriber::new();
+    // use that subscriber to process traces emitted after this point
+    let _ = tracing::subscriber::set_default(subscriber);
+
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = Pool::new(database_url.as_str());
 
@@ -63,9 +68,9 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    const WINNER: &str = "0xeF8305E140ac520225DAf050e2f71d5fBcC543e7";
-    const PROPOSAL_ID: &str = "0x9f71aae9f1444d97bd4291a15820bf3f5578edfa9c41b45277e97b1d997cecf1";
-    const BOOST_ID: &str = "4";
+    const WINNER: &str = "0x3901d0fde202af1427216b79f5243f8a022d68cf";
+    const PROPOSAL_ID: &str = "0xc3beb923ad594240e964324c07b6ed0828687d149c3ef30085e8ca844cf11ee1";
+    const BOOST_ID: &str = "3";
     const CHAIN_ID: &str = "11155111";
 
     #[tokio::test]
@@ -97,7 +102,7 @@ mod tests {
         } else {
             let result = response.unwrap();
             assert_eq!(result.len(), 1);
-            assert_eq!(result[0].signature, "0x8e91dfd90ed6636c492af00a01435e0d29f7b770a02199d423cf4fae006868465cabcd2cbfa70612900cba371d52ccc63bc99ea96fd7891ce9770e28c0cce71f1b");
+            assert_eq!(result[0].signature, "0xd64db19f06886edf57e712abeb5ab55f3c30f4849bda1ead31018f85979310c711d1a3e8e298868f62ec054d0382d89f34ed64b6cdb048a5bed0ac0b99e14b121c");
             assert_eq!(result[0].reward, "10000000000000000");
             assert_eq!(result[0].chain_id, CHAIN_ID);
             assert_eq!(result[0].boost_id, BOOST_ID);
@@ -168,10 +173,7 @@ mod tests {
         } else {
             let result = response.unwrap();
             assert_eq!(result.winners.len(), 1);
-            assert_eq!(
-                result.winners[0],
-                "0xef8305e140ac520225daf050e2f71d5fbcc543e7"
-            );
+            assert_eq!(result.winners[0], WINNER);
             assert_eq!(result.prize, "10000000000000000");
         }
     }

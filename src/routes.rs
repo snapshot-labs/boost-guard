@@ -19,8 +19,11 @@ use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
 use mysql_async::prelude::Queryable;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::str::FromStr;
 use std::time::SystemTime;
+use tracing::info;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GuardInfoResponse {
@@ -47,19 +50,37 @@ pub async fn handle_create_vouchers(
     Extension(state): Extension<State>,
     Json(p): Json<Value>,
 ) -> Result<impl IntoResponse, ServerError> {
-    let reward_infos = get_rewards_inner(&state, p).await?;
+    let request: QueryParams = serde_json::from_value(p)?;
+    // hash the request and the timetsamp in order to get a unique ID for tracing
+    let id = get_unique_id(&request);
+    let span = tracing::span!(
+        tracing::Level::INFO,
+        "create_vouchers",
+        voter = request.voter_address.clone(),
+        ?id
+    );
+    let _guard = span.enter();
+
+    let reward_infos = get_rewards_inner(&state, request).await?;
 
     let mut response = Vec::with_capacity(reward_infos.len());
     for reward_info in reward_infos {
-        let Ok(claim_cfg) = ClaimConfig::try_from(&reward_info) else {
-            continue;
-        };
-        let Ok(signature) = claim_cfg.create_signature(&state.wallet) else {
-            continue;
+        let signature = match ClaimConfig::try_from(&reward_info) {
+            Ok(claim_cfg) => match claim_cfg.create_signature(&state.wallet) {
+                Ok(signature) => format!("0x{}", signature),
+                Err(error) => {
+                    tracing::warn!(?error);
+                    continue;
+                }
+            },
+            Err(error) => {
+                tracing::warn!(?error);
+                continue;
+            }
         };
 
         response.push(CreateVouchersResponse {
-            signature: format!("0x{}", signature),
+            signature,
             reward: reward_info.reward,
             chain_id: reward_info.chain_id,
             boost_id: reward_info.boost_id,
@@ -72,7 +93,19 @@ pub async fn handle_get_rewards(
     Extension(state): Extension<State>,
     Json(p): Json<Value>,
 ) -> Result<impl IntoResponse, ServerError> {
-    let response = get_rewards_inner(&state, p)
+    let request: QueryParams = serde_json::from_value(p)?;
+
+    // hash the request and the timetsamp in order to get a unique ID for tracing
+    let id = get_unique_id(&request);
+    let span = tracing::span!(
+        tracing::Level::INFO,
+        "create_vouchers",
+        voter = request.voter_address.clone(),
+        ?id
+    );
+    let _guard = span.enter();
+
+    let response = get_rewards_inner(&state, request)
         .await?
         .into_iter()
         .map(GetRewardsResponse::from)
@@ -87,18 +120,31 @@ pub async fn handle_get_lottery_winners(
     Json(p): Json<Value>,
 ) -> Result<impl IntoResponse, ServerError> {
     let request: GetLotteryWinnerQueryParams = serde_json::from_value(p)?;
+
+    // hash the request and the timetsamp in order to get a unique ID for tracing
+    let id = get_unique_id(&request);
+    let span = tracing::span!(
+        tracing::Level::INFO,
+        "create_vouchers",
+        boost = request.boost_id,
+        ?id
+    );
+    let _guard = span.enter();
+
     let proposal_info: ProposalInfo =
         get_proposal_info(&state.client, &request.proposal_id).await?;
 
-    if let Err(e) = validate_proposal_info(&proposal_info) {
-        if let ServerError::ProposalStillInProgress = e {
+    if let Err(error) = validate_proposal_info(&proposal_info) {
+        if let ServerError::ProposalStillInProgress = error {
             // Proposal is still in progress, so we should remove the proposal from the cache.
+            tracing::info!("proposal still in progress, removing from cache");
             let mut cache = GET_PROPOSAL_INFO.lock().await;
             cache.cache_remove(request.proposal_id.as_str());
-            return Err(e);
+            return Err(error);
         } else {
             // Proposal is invalid for a reason that will not change with other queries. Just return the error.
-            return Err(e);
+            tracing::info!(?error);
+            return Err(error);
         }
     }
 
@@ -106,6 +152,11 @@ pub async fn handle_get_lottery_winners(
 
     // Ensure the requested proposal id actually corresponds to the boosted proposal
     if boost_info.params.proposal != request.proposal_id {
+        tracing::warn!(
+            expected = request.proposal_id,
+            actual = boost_info.params.proposal,
+            "proposal id mismatch"
+        );
         return Err(ServerError::ErrorString("proposal id mismatch".to_string()));
     }
 
@@ -261,6 +312,7 @@ impl TryFrom<(boost_query::BoostQueryBoost, &str)> for BoostInfo {
                     eligibility,
                     distribution,
                 };
+                tracing::info!(boost_params = ?bp);
 
                 let pool_size = U256::from_dec_str(&value.0.pool_size)
                     .map_err(|_| "failed to parse pool size")?;
@@ -383,7 +435,10 @@ impl TryFrom<boost_query::BoostQueryBoostStrategyDistribution> for DistributionT
                     Ok(DistributionType::Lottery(num_winners, None))
                 }
             }
-            _ => Err("invalid distribution"),
+            _ => {
+                tracing::warn!(?value.type_, "invalid distribution");
+                Err("invalid distribution")
+            }
         }
     }
 }
@@ -476,10 +531,8 @@ impl TryFrom<proposal_query::ProposalQueryProposal> for ProposalInfo {
 // Helper function to compute the rewards for a given boost and a user request
 async fn get_rewards_inner(
     state: &State,
-    p: serde_json::Value,
+    request: QueryParams,
 ) -> Result<Vec<RewardInfo>, ServerError> {
-    let request: QueryParams = serde_json::from_value(p)?;
-
     let proposal_info: ProposalInfo =
         get_proposal_info(&state.client, &request.proposal_id).await?;
 
@@ -498,26 +551,32 @@ async fn get_rewards_inner(
     let vote_info =
         get_vote_info(&state.pool, &request.voter_address, &request.proposal_id).await?;
 
+    tracing::debug!(?vote_info, "vote_info");
+
     let mut response = Vec::with_capacity(request.boosts.len());
     for (boost_id, chain_id) in request.boosts {
         let boost_info = match get_boost_info(&state.client, &boost_id, &chain_id).await {
             Ok(boost_info) => boost_info,
-            Err(e) => {
-                eprintln!("{:?}", e);
+            Err(error) => {
+                tracing::warn!(?error);
                 continue;
             }
         };
 
         // Ensure the requested proposal id actually corresponds to the boosted proposal
         if boost_info.params.proposal != request.proposal_id {
-            eprintln!("proposal id mismatch");
+            tracing::warn!(
+                expected = request.proposal_id,
+                actual = boost_info.params.proposal,
+                "proposal id mismatch"
+            );
             continue;
         }
 
         match validate_choice(vote_info.choice, boost_info.params.eligibility) {
             Ok(_) => (),
-            Err(e) => {
-                eprintln!("{:?}", e);
+            Err(error) => {
+                tracing::warn!(choice = vote_info.choice, eligibbility = ?boost_info.params.eligibility, ?error);
                 continue;
             }
         }
@@ -525,12 +584,13 @@ async fn get_rewards_inner(
         let reward =
             match get_user_reward(&state.pool, &boost_info, &proposal_info, &vote_info).await {
                 Ok(reward) => reward,
-                Err(e) => {
-                    eprintln!("{:?}", e);
+                Err(error) => {
+                    tracing::warn!("{:?}", error);
                     continue;
                 }
             };
 
+        tracing::debug!(?reward);
         response.push(RewardInfo {
             voter_address: request.voter_address.clone(),
             reward: reward.to_string(),
@@ -553,6 +613,7 @@ async fn get_proposal_info(
     client: &reqwest::Client,
     proposal_id: &str,
 ) -> Result<ProposalInfo, ServerError> {
+    tracing::info!(?proposal_id, "get_proposal_info");
     let variables = proposal_query::Variables {
         id: proposal_id.to_owned(),
     };
@@ -565,6 +626,8 @@ async fn get_proposal_info(
         .send()
         .await?;
     let response_body: GraphQLResponse<proposal_query::ResponseData> = res.json().await?;
+    tracing::info!("response_body: {:?}", response_body);
+
     let proposal_query: proposal_query::ProposalQueryProposal = response_body
         .data
         .ok_or("missing data from the hub")?
@@ -578,6 +641,7 @@ async fn get_boost_info(
     boost_id: &str,
     chain_id: &str,
 ) -> Result<BoostInfo, ServerError> {
+    info!(?boost_id, ?chain_id, "get_boost_info");
     let variables = boost_query::Variables {
         id: boost_id.to_owned(),
     };
@@ -739,6 +803,13 @@ fn get_reward_from_cached_values(
     decimals: u8,
     limit: U256,
 ) -> U256 {
+    tracing::info!(
+        ?cached_values,
+        ?voting_power,
+        ?decimals,
+        ?limit,
+        "get_reward_from_cached_values"
+    );
     let pow = cached_pow(decimals);
     let vp = U256::from((voting_power * pow) as u128);
     let (cached_vp, cached_reward) = cached_values;
@@ -818,6 +889,7 @@ fn compute_rewards(
     let mut score = votes.iter().fold(U256::from(0), |acc, vote_info| {
         acc + U256::from((vote_info.voting_power * pow) as u128)
     });
+    tracing::info!(total_score = ?score);
 
     // TODO: optimize: we could check if the first voter reaches limit. If he doesn't, then we can simplify the computation.
 
@@ -838,6 +910,20 @@ fn compute_rewards(
     }
 
     Ok(values)
+}
+
+/// Creates a unique id by concatenating `input` and the current timestamp together and hashing the resulting string.
+fn get_unique_id<T: std::fmt::Debug>(input: T) -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+
+    let to_hash = format!("{:?}|{}", input, timestamp);
+    let mut hasher = std::hash::DefaultHasher::new();
+    to_hash.hash(&mut hasher);
+    let output = hasher.finish();
+    format!("{:x}", output)
 }
 
 fn validate_proposal_info(proposal_info: &ProposalInfo) -> Result<(), ServerError> {

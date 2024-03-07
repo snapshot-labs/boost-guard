@@ -52,6 +52,7 @@ pub async fn cached_lottery_winners(
     conn.disconnect().await?;
 
     if result.is_empty() {
+        tracing::warn!("No votes found for proposal {}", proposal_info.id);
         return Ok(HashMap::new());
     }
 
@@ -67,6 +68,7 @@ pub async fn cached_lottery_winners(
 
     // If there are not enough voters, then every voter is eligible to the same reward
     if votes.len() <= num_winners as usize {
+        tracing::warn!("Not enough voters to enforce the limit");
         let prize = boost_info.pool_size / votes.len() as u32;
         return Ok(votes.into_iter().map(|v| (v.voter, prize)).collect());
     }
@@ -94,11 +96,12 @@ fn adjust_vote_weights(
     limit: u16,
 ) -> Result<(), ServerError> {
     if limit == 0 {
-        // log needed
+        tracing::warn!("limit is 0, no need to adjust");
         return Ok(());
     }
 
     if limit == MYRIAD {
+        tracing::warn!("limit is 100%, no need to adjust");
         // log needed
         return Ok(());
     }
@@ -112,7 +115,7 @@ fn adjust_vote_weights(
     }
 
     if votes.len() < (MYRIAD as f64 / limit as f64).ceil() as usize {
-        // log needed "not enough voters to enforce the limit"
+        tracing::warn!("not enough voters to enforce the limit");
         return Ok(());
     }
 
@@ -218,9 +221,11 @@ async fn randao_from_timestamp(timestamp: u64) -> Result<String, ServerError> {
         BEACONCHAIN_API_KEY.as_str()
     );
     let slot: Value = client.get(&slot_url).send().await?.json().await?;
+    tracing::info!(?slot);
     let epoch = slot["data"]["epoch"]
         .as_u64()
         .ok_or("failed to parse epoch")?;
+    tracing::info!(?epoch);
 
     // Step 3
     let epoch_url = format!(
@@ -244,6 +249,7 @@ async fn randao_from_timestamp(timestamp: u64) -> Result<String, ServerError> {
         .ok_or("randao_reveal is not a string")?
         .to_string();
 
+    tracing::info!(?randao_reveal);
     Ok(randao_reveal)
 }
 
