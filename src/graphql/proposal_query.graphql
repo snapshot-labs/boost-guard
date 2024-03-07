@@ -3,13 +3,13 @@ query ProposalQuery($id: String!) {
     id: $id
   ) {
     id
-    type
     choices
-    start
     end
-    snapshot
     scores
     scores_total
+    snapshot
+    start
+    type
     votes
   }
 }
