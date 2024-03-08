@@ -18,7 +18,6 @@ RUN apt-get update && apt-get install -y ca-certificates libssl-dev libssl3
 WORKDIR /app
 COPY --from=builder /app/target/release/boost-guard /usr/local/bin
 
-ENV HUB_URL "https://hub.snapshot.org/graphql"
 ENV SEPOLIA_SUBGRAPH_URL "https://api.studio.thegraph.com/query/23545/boost-sepolia/version/latest"
 ENV MAINNET_SUBGRAPH_URL "https://api.studio.thegraph.com/query/23545/boost/version/latest"
 ENV BOOST_NAME "boost"
