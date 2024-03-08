@@ -14,6 +14,11 @@ use dotenv::dotenv;
 async fn main() {
     dotenv().ok();
 
+    // construct a subscriber that prints formatted traces to stdout
+    let subscriber = tracing_subscriber::FmtSubscriber::new();
+    // use that subscriber to process traces emitted after this point
+    let _ = tracing::subscriber::set_global_default(subscriber);
+
     let port: u16 = env::var("PORT")
         .map(|val| val.parse::<u16>().unwrap())
         .unwrap_or(8080);
@@ -25,11 +30,6 @@ async fn main() {
 
 fn app() -> Router {
     dotenv().ok();
-
-    // construct a subscriber that prints formatted traces to stdout
-    let subscriber = tracing_subscriber::FmtSubscriber::new();
-    // use that subscriber to process traces emitted after this point
-    let _ = tracing::subscriber::set_default(subscriber);
 
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = Pool::new(database_url.as_str());
