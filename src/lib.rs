@@ -19,11 +19,6 @@ lazy_static! {
     static ref HUB_URL: String = {
         dotenv().ok();
 
-        #[cfg(feature = "testnet")]
-        return env::var("TESTNET_HUB_URL")
-            .expect("Please add TESTNET_HUB_URL to your environment or .env file.");
-
-        #[cfg(not(feature = "testnet"))]
         return env::var("HUB_URL").expect("Please add HUB_URL to your environment or .env file.");
     };
     static ref SUBGRAPH_URLS: HashMap<&'static str, String> = {
