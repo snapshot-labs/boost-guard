@@ -4,7 +4,7 @@ use crate::routes::boost_query::BoostQueryBoostStrategy;
 use crate::routes::boost_query::BoostQueryBoostStrategyEligibility;
 use crate::signatures::ClaimConfig;
 use crate::State;
-use crate::{ServerError, HUB_URL, MYRIAD, SUBGRAPH_URLS};
+use crate::{ServerError, DISABLED_TOKENS, HUB_URL, MYRIAD, SUBGRAPH_URLS};
 use ::axum::extract::Json;
 use axum::response::IntoResponse;
 use axum::Extension;
@@ -287,6 +287,7 @@ pub struct BoostInfo {
     pub params: BoostParams,
     pub pool_size: U256,
     pub decimals: u8,
+    pub token: Address,
 }
 
 impl TryFrom<(boost_query::BoostQueryBoost, &str)> for BoostInfo {
@@ -322,6 +323,8 @@ impl TryFrom<(boost_query::BoostQueryBoost, &str)> for BoostInfo {
                     .decimals
                     .parse()
                     .map_err(|_| "failed to parse decimals")?;
+                let token =
+                    Address::from_str(&value.0.token.id).map_err(|_| "failed to parse token")?;
 
                 Ok(Self {
                     id,
@@ -330,6 +333,7 @@ impl TryFrom<(boost_query::BoostQueryBoost, &str)> for BoostInfo {
                     params: bp,
                     pool_size,
                     decimals,
+                    token,
                 })
             }
         }
@@ -578,6 +582,16 @@ async fn get_rewards_inner(
                 expected = request.proposal_id,
                 actual = boost_info.params.proposal,
                 "proposal id mismatch"
+            );
+            continue;
+        }
+
+        // TODO: validate token address and chain_id againt disabled token list
+        if DISABLED_TOKENS.contains(&(boost_info.token, &chain_id)) {
+            tracing::warn!(
+                token = ?boost_info.token,
+                chain_id = ?chain_id,
+                "token is disabled"
             );
             continue;
         }
@@ -1431,7 +1445,8 @@ mod test_compute_user_reward {
     use super::BoostParams;
     use super::{get_user_reward, DistributionType};
     use super::{BoostInfo, ProposalInfo, VoteWithChoice};
-    use ethers::types::U256;
+    use ethers::types::{Address, U256};
+    use std::str::FromStr;
 
     #[tokio::test]
     async fn even_distribution_one_voter() {
@@ -1622,5 +1637,39 @@ mod test_compute_user_reward {
             reward3,
             U256::from(voting_power3 as u128) * pool_size / proposal_score
         );
+    }
+
+    #[tokio::test]
+    async fn disabled_token() {
+        let voting_power = 10.0;
+        let proposal_score = U256::from(100);
+        let pool_size = U256::from(100);
+        let num_votes = 1;
+        let boost_info: BoostInfo = BoostInfo {
+            pool_size,
+            params: BoostParams {
+                distribution: DistributionType::Even,
+                ..Default::default()
+            },
+            token: Address::from_str("0xdac17f958d2ee523a2206206994597c13d831ec7").unwrap(),
+            chain_id: U256::from(1),
+            ..Default::default()
+        };
+        let proposal_info = ProposalInfo {
+            score: proposal_score.as_u128() as f64,
+            num_votes,
+            ..Default::default()
+        };
+        let vote_info = VoteWithChoice {
+            voting_power,
+            ..Default::default()
+        };
+        let pool = mysql_async::Pool::new("mysql://username:password@toto:3306/db");
+
+        let reward = get_user_reward(&pool, &boost_info, &proposal_info, &vote_info)
+            .await
+            .unwrap();
+
+        assert_eq!(reward, pool_size);
     }
 }

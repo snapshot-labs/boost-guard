@@ -1,9 +1,12 @@
 use axum::response::{IntoResponse, Response};
+use ethers::types::Address;
 use hyper::http::StatusCode;
+use std::collections::HashSet;
 
 pub mod lottery;
 pub mod routes;
 pub mod signatures;
+pub mod tokens;
 
 use std::env;
 extern crate dotenv;
@@ -51,6 +54,8 @@ lazy_static! {
         env::var("EPOCH_URL").expect("Please add EPOCH_URL to your environment or .env file");
     static ref SLOT_URL: String =
         env::var("SLOT_URL").expect("Please add SLOT_URL to your environment or .env file");
+    static ref DISABLED_TOKENS: HashSet<(Address, &'static str)> =
+        tokens::create_disabled_token_list();
 }
 
 #[derive(Debug, PartialEq, Clone)]
