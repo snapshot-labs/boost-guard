@@ -85,6 +85,11 @@ fn get_list() -> &'static str {
         "polygon": "0x23001f892c0c82b79303edc9b9033cd190bb21c7"
     },
     {
+        "symbol": "GHO",
+        "ethereum": "0x40d16fc0246ad3160ccc09b8d0d3a2cd28ae6c2f",
+        "polygon": ""
+    },
+    {
         "symbol": "WBTC",
         "ethereum": "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
         "polygon": "0x1bfd67037b42cf73acF2047067bd4F2C47D9BfD6"
@@ -129,7 +134,7 @@ mod test_tokens {
     #[test]
     fn test_create_disabled_token_list() {
         let disabled_tokens = create_disabled_token_list();
-        assert_eq!(disabled_tokens.len(), 27);
+        assert_eq!(disabled_tokens.len(), 28);
         assert!(disabled_tokens.contains(&(
             "0xdac17f958d2ee523a2206206994597c13d831ec7"
                 .parse()
