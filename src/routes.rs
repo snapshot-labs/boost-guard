@@ -423,6 +423,11 @@ impl TryFrom<boost_query::BoostQueryBoostStrategyDistribution> for DistributionT
                     .parse()
                     .map_err(|_| "failed to parse num winners")?;
 
+                if num_winners == 0 {
+                    tracing::warn!(?num_winners, "invalid number of winners");
+                    return Err("invalid number of winners: 0");
+                }
+
                 let limit = value.limit;
                 if let Some(l) = limit {
                     match l.parse() {
