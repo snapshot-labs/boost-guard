@@ -124,8 +124,8 @@ fn adjust_vote_weights(
     // The "voting power" remaining. At each iteration, we will subtract the voting power of the voter.
     let mut remaining_score = U256::from((score * pow) as u128);
 
-    // The "adjust voting power" remaining. At each iteration, we will subtract the adjusted voting power of the voter.
-    let mut adjusted_remaining_score = remaining_score;
+    // The "effective voting power" remaining. At each iteration, we will subtract the effective voting power of the voter.
+    let mut effective_remaining_score = remaining_score;
 
     // The maximum adjusted voting power that can be assigned to any voter
     let vp_limit = remaining_score * limit / MYRIAD;
@@ -133,16 +133,16 @@ fn adjust_vote_weights(
     votes.iter_mut().for_each(|v| {
         let vp = U256::from((v.voting_power * pow) as u128);
         // If the user reaches the limit, assign the limit, else assign the correct ratio.
-        let adjusted_voting_power =
-            std::cmp::min(vp_limit, adjusted_remaining_score * vp / remaining_score);
+        let effective_voting_power =
+            std::cmp::min(vp_limit, effective_remaining_score * vp / remaining_score);
 
         // Subtract the voting power
         remaining_score -= vp;
-        // Subtract the adjusted voting power
-        adjusted_remaining_score -= adjusted_voting_power;
+        // Subtract the effective voting power
+        effective_remaining_score -= effective_voting_power;
 
         // Update the voter's voting power
-        v.voting_power = adjusted_voting_power.as_u128() as f64 / pow;
+        v.voting_power = effective_voting_power.as_u128() as f64 / pow;
     });
 
     Ok(())
