@@ -591,7 +591,6 @@ async fn get_rewards_inner(
             continue;
         }
 
-        // TODO: validate token address and chain_id againt disabled token list
         if DISABLED_TOKENS.contains(&(boost_info.token, &chain_id)) {
             tracing::warn!(
                 token = ?boost_info.token,
@@ -913,7 +912,8 @@ fn compute_rewards(
         return Err(ServerError::ErrorString("votes are not sorted".to_string()));
     }
 
-    // let mut score = U256::from((score_decimal * pow) as u128); // TODO: investigate why this value is incorrect
+    // let mut score = U256::from((score_decimal * pow) as u128); // TODO: ideally we would simply use `score_decimal` but
+    // it doesn't yield the correct value. For now, we iterate overe votes and use this as the actual sum.
     let mut score = votes.iter().fold(U256::from(0), |acc, vote_info| {
         acc + U256::from((vote_info.voting_power * pow) as u128)
     });
