@@ -16,14 +16,15 @@ To run your own instance:
 
 The following variable environment are required for the guard to run:
 - `HUB_URL`: The url to the snapshot hub
-- `SUBGRAPH_URL`: The url of the subgraph
+- `MAINNET_SUBGRAPH_URL`: The url to the mainnet subgraph
+- `SEPOLIA_SUBGRAPH_URL`: The url to the sepolia subgraph
 - `PRIVATE_KEY`: The guard private key
 - `BOOST_NAME`: The boost name used for EIP712 signature (should match the onchain name)
-- `BOOST_VERSION` The boost version used for EIP712 signature (should match the onchain version)
-- `VERIFYING_CONTRACT` The onchain boost address
+- `BOOST_VERSION`: The boost version used for EIP712 signature (should match the onchain version)
+- `VERIFYING_CONTRACT`: The onchain boost address
+- `SLOT_URL`: The URL to `/api/v1/slot/` of an eth2 node
+- `EPOCH_URL`: The URL to `/api/v1/epoch/` of an eth2 node
+- `DATABASE_URL`: A read-only URL acces to the hub's database
+- `BEACONCHAIN_API_KEY`: API key to your beaconcha.in account (can be empty if you use your own eth2 node)
 
-## API
-
-todo
-
-Please feel free to read the [docs](https://docs.boost.limo/).
+Please feel free to read the [docs](https://docs.snapshot.org/user-guides/boost).
