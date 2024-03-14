@@ -40,6 +40,12 @@ lazy_static! {
                 .expect("Please add SEPOLIA_SUBGRAPH_URL to your environment or .env file."),
         );
 
+        map.insert(
+            "137",
+            env::var("POLYGON_SUBGRAPH_URL")
+                .expect("Please add POLYGON_SUBGRAPH_URL to your environment or .env file."),
+        );
+
         map
     };
     static ref BEACONCHAIN_API_KEY: String = env::var("BEACONCHAIN_API_KEY")
