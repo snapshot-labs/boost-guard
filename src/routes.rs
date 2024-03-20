@@ -24,6 +24,7 @@ use std::hash::Hasher;
 use std::str::FromStr;
 use std::time::SystemTime;
 use tracing::info;
+use tracing_futures::Instrument;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GuardInfoResponse {
@@ -59,34 +60,36 @@ pub async fn handle_create_vouchers(
         voter = request.voter_address.clone(),
         ?id
     );
-    let _guard = span.enter();
+    async {
+        let reward_infos = get_rewards_inner(&state, request).await?;
 
-    let reward_infos = get_rewards_inner(&state, request).await?;
-
-    let mut response = Vec::with_capacity(reward_infos.len());
-    for reward_info in reward_infos {
-        let signature = match ClaimConfig::try_from(&reward_info) {
-            Ok(claim_cfg) => match claim_cfg.create_signature(&state.wallet) {
-                Ok(signature) => format!("0x{}", signature),
+        let mut response = Vec::with_capacity(reward_infos.len());
+        for reward_info in reward_infos {
+            let signature = match ClaimConfig::try_from(&reward_info) {
+                Ok(claim_cfg) => match claim_cfg.create_signature(&state.wallet) {
+                    Ok(signature) => format!("0x{}", signature),
+                    Err(error) => {
+                        tracing::warn!(?error);
+                        continue;
+                    }
+                },
                 Err(error) => {
                     tracing::warn!(?error);
                     continue;
                 }
-            },
-            Err(error) => {
-                tracing::warn!(?error);
-                continue;
-            }
-        };
+            };
 
-        response.push(CreateVouchersResponse {
-            signature,
-            reward: reward_info.reward,
-            chain_id: reward_info.chain_id,
-            boost_id: reward_info.boost_id,
-        });
+            response.push(CreateVouchersResponse {
+                signature,
+                reward: reward_info.reward,
+                chain_id: reward_info.chain_id,
+                boost_id: reward_info.boost_id,
+            });
+        }
+        Ok(Json(response))
     }
-    Ok(Json(response))
+    .instrument(span) // Attaches the span to the async block
+    .await // Waits for the async block to complete
 }
 
 pub async fn handle_get_rewards(
@@ -103,15 +106,18 @@ pub async fn handle_get_rewards(
         voter = request.voter_address.clone(),
         ?id
     );
-    let _guard = span.enter();
 
-    let response = get_rewards_inner(&state, request)
-        .await?
-        .into_iter()
-        .map(GetRewardsResponse::from)
-        .collect::<Vec<_>>();
+    async {
+        let response = get_rewards_inner(&state, request)
+            .await?
+            .into_iter()
+            .map(GetRewardsResponse::from)
+            .collect::<Vec<_>>();
 
-    Ok(Json(response))
+        Ok(Json(response))
+    }
+    .instrument(span) // Attaches the span to the async block
+    .await // Waits for the async block to complete
 }
 
 // TODO: kind of a rewrite of get_rewards?
@@ -129,58 +135,67 @@ pub async fn handle_get_lottery_winners(
         boost = request.boost_id,
         ?id
     );
-    let _guard = span.enter();
 
-    let proposal_info: ProposalInfo =
-        get_proposal_info(&state.client, &request.proposal_id).await?;
+    async {
+        let proposal_info: ProposalInfo =
+            get_proposal_info(&state.client, &request.proposal_id).await?;
 
-    if let Err(error) = validate_proposal_info(&proposal_info) {
-        if let ServerError::ProposalStillInProgress = error {
-            // Proposal is still in progress, so we should remove the proposal from the cache.
-            tracing::info!("proposal still in progress, removing from cache");
-            let mut cache = GET_PROPOSAL_INFO.lock().await;
-            cache.cache_remove(request.proposal_id.as_str());
-            return Err(error);
+        if let Err(error) = validate_proposal_info(&proposal_info) {
+            if let ServerError::ProposalStillInProgress = error {
+                // Proposal is still in progress, so we should remove the proposal from the cache.
+                tracing::info!("proposal still in progress, removing from cache");
+                let mut cache = GET_PROPOSAL_INFO.lock().await;
+                cache.cache_remove(request.proposal_id.as_str());
+                return Err(error);
+            } else {
+                // Proposal is invalid for a reason that will not change with other queries. Just return the error.
+                tracing::info!(?error);
+                return Err(error);
+            }
+        }
+
+        let boost_info =
+            get_boost_info(&state.client, &request.boost_id, &request.chain_id).await?;
+
+        // Ensure the requested proposal id actually corresponds to the boosted proposal
+        if boost_info.params.proposal != request.proposal_id {
+            tracing::warn!(
+                expected = request.proposal_id,
+                actual = boost_info.params.proposal,
+                "proposal id mismatch"
+            );
+            return Err(ServerError::ErrorString("proposal id mismatch".to_string()));
+        }
+
+        if let DistributionType::Lottery(num_winners, limit) = boost_info.params.distribution {
+            let winners = cached_lottery_winners(
+                &state.pool,
+                &boost_info,
+                &proposal_info,
+                num_winners,
+                limit,
+            )
+            .await?;
+
+            let response = GetLotteryWinnersResponse {
+                winners: winners.keys().map(|a| format!("{a:?}")).collect(),
+                prize: winners
+                    .values()
+                    .next()
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| "0".to_string()),
+                chain_id: request.chain_id.to_string(),
+                boost_id: request.boost_id.to_string(),
+            };
+            Ok(Json(response))
         } else {
-            // Proposal is invalid for a reason that will not change with other queries. Just return the error.
-            tracing::info!(?error);
-            return Err(error);
+            Err(ServerError::ErrorString(
+                "boost is not a lottery".to_string(),
+            ))
         }
     }
-
-    let boost_info = get_boost_info(&state.client, &request.boost_id, &request.chain_id).await?;
-
-    // Ensure the requested proposal id actually corresponds to the boosted proposal
-    if boost_info.params.proposal != request.proposal_id {
-        tracing::warn!(
-            expected = request.proposal_id,
-            actual = boost_info.params.proposal,
-            "proposal id mismatch"
-        );
-        return Err(ServerError::ErrorString("proposal id mismatch".to_string()));
-    }
-
-    if let DistributionType::Lottery(num_winners, limit) = boost_info.params.distribution {
-        let winners =
-            cached_lottery_winners(&state.pool, &boost_info, &proposal_info, num_winners, limit)
-                .await?;
-
-        let response = GetLotteryWinnersResponse {
-            winners: winners.keys().map(|a| format!("{a:?}")).collect(),
-            prize: winners
-                .values()
-                .next()
-                .map(|p| p.to_string())
-                .unwrap_or_else(|| "0".to_string()),
-            chain_id: request.chain_id.to_string(),
-            boost_id: request.boost_id.to_string(),
-        };
-        Ok(Json(response))
-    } else {
-        Err(ServerError::ErrorString(
-            "boost is not a lottery".to_string(),
-        ))
-    }
+    .instrument(span) // Attaches the span to the async block
+    .await // Waits for the async block to complete
 }
 
 pub async fn handle_health() -> Result<impl IntoResponse, ServerError> {
