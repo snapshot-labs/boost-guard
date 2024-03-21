@@ -18,6 +18,7 @@ async fn main() {
     let subscriber = tracing_subscriber::FmtSubscriber::new();
     // use that subscriber to process traces emitted after this point
     let _ = tracing::subscriber::set_global_default(subscriber);
+    tracing::info!("Starting server...");
 
     let port: u16 = env::var("PORT")
         .map(|val| val.parse::<u16>().unwrap())
