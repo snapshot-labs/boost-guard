@@ -861,33 +861,7 @@ async fn cached_weighted_rewards_ratio(
     proposal_info: &ProposalInfo,
     limit: U256,
 ) -> Result<(U256, U256), ServerError> {
-    let mut conn = pool.get_conn().await?;
-
-    let choice_clause = if let BoostEligibility::Bribe(choice) = boost_info.params.eligibility {
-        format!("AND choice = {}", choice)
-    } else {
-        "".to_string()
-    };
-
-    let query = format!(
-        "SELECT voter, vp
-        FROM votes
-        WHERE proposal = '{}'
-        {}
-        ORDER BY vp DESC;",
-        proposal_info.id, choice_clause
-    );
-
-    let votes: Vec<Vote> = conn
-        .query_map(query, |(voter, vp): (String, f64)| {
-            let v = Address::from_str(voter.as_str()).expect("address is ill-formatted");
-
-            Vote {
-                voter: v,
-                voting_power: vp,
-            }
-        })
-        .await?;
+    let votes = get_votes(pool, &proposal_info.id, &boost_info.params.eligibility).await?;
 
     compute_rewards(
         votes,
@@ -957,6 +931,43 @@ fn get_unique_id<T: std::fmt::Debug>(input: T) -> String {
     format!("{:x}", output)
 }
 
+async fn get_votes(
+    pool: &mysql_async::Pool,
+    proposal_id: &str,
+    eligibility: &BoostEligibility,
+) -> Result<Vec<Vote>, ServerError> {
+    let choice = if let BoostEligibility::Bribe(choice) = eligibility {
+        format!("AND choice = {}", choice)
+    } else {
+        "".to_string()
+    };
+
+    let mut conn = pool.get_conn().await?;
+
+    let query = format!(
+        "SELECT voter, vp
+        FROM votes
+        WHERE proposal = '{}'
+        {}
+        ORDER BY vp DESC;",
+        proposal_id, choice
+    );
+
+    let votes: Vec<Vote> = conn
+        .query_map(query, |(voter, vp): (String, f64)| {
+            let v = Address::from_str(voter.as_str()).expect("address is ill-formatted");
+
+            Vote {
+                voter: v,
+                voting_power: vp,
+            }
+        })
+        .await?;
+
+    conn.disconnect().await?;
+    Ok(votes)
+}
+
 fn validate_proposal_info(proposal_info: &ProposalInfo) -> Result<(), ServerError> {
     validate_end_time(proposal_info.end)?;
     validate_type(&proposal_info.type_)?;
@@ -1021,7 +1032,7 @@ mod test_cached_results {
     use crate::routes::get_proposal_info;
 
     use super::*;
-    use super::{CACHED_NUM_VOTES, CACHED_WEIGHTED_REWARDS};
+    use super::{CACHED_NUM_VOTES, CACHED_WEIGHTED_REWARDS_RATIO};
     use cached::Cached;
     use dotenv::dotenv;
     use ethers::types::{Address, U256};
@@ -1037,9 +1048,8 @@ mod test_cached_results {
         let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
         let pool = Pool::new(database_url.as_str());
         let boost_info = Default::default();
-        let client = reqwest::Client::new();
         let proposal_id = "0x11e9daab4e806cba220d5d6eae6be76f799f27ad20723d0aabedf0263ca2a28f";
-        let proposal_info = get_proposal_info(&client, proposal_id).await.unwrap();
+        let proposal_info = get_proposal_info(&pool, proposal_id).await.unwrap();
         let boosted_choice = 1;
 
         let num_votes = cached_num_votes(&pool, &boost_info, &proposal_info, boosted_choice)
@@ -1075,45 +1085,62 @@ mod test_cached_results {
             },
             pool_size: U256::from(10000000000000000000000_u128), // 10_000 * 10**18
             decimals: 18,
+            token: Address::from_str("0x0000000000000000000000000000000000000000").unwrap(),
         };
-        let client = reqwest::Client::new();
-        let proposal_info = get_proposal_info(&client, proposal_id).await.unwrap();
+        let proposal_info = get_proposal_info(&pool, proposal_id).await.unwrap();
 
-        let rewards = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+        let cached_values =
+            cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
+                .await
+                .unwrap();
+
+        // Ensure distribution doesn't exceed the pool size
+        let votes: Vec<Vote> = get_votes(&pool, &proposal_info.id, &boost_info.params.eligibility)
             .await
             .unwrap();
-
-        // Ensure all reward is distributed
-        let sum: U256 = rewards.values().fold(U256::from(0), |acc, x| acc + x);
-        assert_eq!(sum, boost_info.pool_size);
-
-        // Ensure all eligible voters are rewarded
-        assert_eq!(rewards.len(), ELIGIBLE_VOTERS);
+        let sum: U256 = votes.iter().fold(U256::from(0), |acc, vote| {
+            acc + get_reward_from_cached_values(
+                cached_values,
+                vote.voting_power,
+                boost_info.decimals,
+                limit,
+            )
+        });
+        assert!(sum <= boost_info.pool_size);
 
         // Pick three values at random
+        // voter: 0x0E457324f0c6125b20392341Cdeb7bf9bCB02322, vp: 80099.00382066128
         assert_eq!(
-            *rewards
-                .get(&Address::from_str("0x0E457324f0c6125b20392341Cdeb7bf9bCB02322").unwrap())
-                .unwrap(),
+            get_reward_from_cached_values(
+                cached_values,
+                80099.00382066128,
+                boost_info.decimals,
+                limit
+            ),
             U256::from(210367026718988690605_u128)
         );
-        // User who voted No does not get rewarded
+
+        // voter: 0x31B6BE9b49974A66F1A2C3787B44E694AD13EC27, vp: 5379.420851547202
         assert_eq!(
-            rewards.get(&Address::from_str("0xB9cF551E73bEC54332D76A7542FdacBb77BFA430").unwrap()),
-            None
-        );
-        assert_eq!(
-            *rewards
-                .get(&Address::from_str("0x31B6BE9b49974A66F1A2C3787B44E694AD13EC27").unwrap())
-                .unwrap(),
+            get_reward_from_cached_values(
+                cached_values,
+                5379.420851547202,
+                boost_info.decimals,
+                limit
+            ),
             U256::from(14128175333414183359_u128)
         );
 
-        let hits = CACHED_WEIGHTED_REWARDS.lock().await.cache_hits().unwrap();
-        let _ = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+        // Ensure that cache works properly
+        let hits = CACHED_WEIGHTED_REWARDS_RATIO
+            .lock()
+            .await
+            .cache_hits()
+            .unwrap();
+        let _ = cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
             .await
             .unwrap();
-        assert!(CACHED_WEIGHTED_REWARDS.lock().await.cache_hits() == Some(hits + 1));
+        assert!(CACHED_WEIGHTED_REWARDS_RATIO.lock().await.cache_hits() == Some(hits + 1));
 
         // -------
         // Now, a new boost that will reach the limit
@@ -1133,40 +1160,58 @@ mod test_cached_results {
             },
             pool_size: U256::from(10000000000000000000000_u128), // 10_000 * 10**18
             decimals: 18,
+            token: Address::from_str("0x0000000000000000000000000000000000000000").unwrap(),
         };
 
-        let rewards = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+        let cached_values =
+            cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
+                .await
+                .unwrap();
+
+        // Ensure distribution doesn't exceed pool size
+        let votes: Vec<Vote> = get_votes(&pool, &proposal_info.id, &boost_info.params.eligibility)
             .await
             .unwrap();
-
-        // Ensure all reward is distributed
-        let sum: U256 = rewards.values().fold(U256::from(0), |acc, x| acc + x);
-        assert_eq!(sum, boost_info.pool_size);
+        let sum: U256 = votes.iter().fold(U256::from(0), |acc, vote| {
+            acc + get_reward_from_cached_values(
+                cached_values,
+                vote.voting_power,
+                boost_info.decimals,
+                limit,
+            )
+        });
+        assert!(sum <= boost_info.pool_size);
 
         // Ensure the biggest voter reaches the limit
+        // voter: 0xe0dEDCDb5B5Ef2c82E4AdC60AACC23486A518357, vp: 160806.8675534188
         assert_eq!(
-            *rewards
-                .get(&Address::from_str("0xe0dEDCDb5B5Ef2c82E4AdC60AACC23486A518357").unwrap())
-                .unwrap(),
+            get_reward_from_cached_values(
+                cached_values,
+                160806.8675534188,
+                boost_info.decimals,
+                limit
+            ),
             limit
         );
 
         // Other voters should have a different reward
         assert_eq!(
-            *rewards
-                .get(&Address::from_str("0x0E457324f0c6125b20392341Cdeb7bf9bCB02322").unwrap())
-                .unwrap(),
+            get_reward_from_cached_values(
+                cached_values,
+                80099.00382066128,
+                boost_info.decimals,
+                limit
+            ),
             U256::from(84466625025568633775_u128)
         );
-        // User who voted No does not get rewarded
+
         assert_eq!(
-            rewards.get(&Address::from_str("0xB9cF551E73bEC54332D76A7542FdacBb77BFA430").unwrap()),
-            None
-        );
-        assert_eq!(
-            *rewards
-                .get(&Address::from_str("0x31B6BE9b49974A66F1A2C3787B44E694AD13EC27").unwrap())
-                .unwrap(),
+            get_reward_from_cached_values(
+                cached_values,
+                5379.420851547202,
+                boost_info.decimals,
+                limit
+            ),
             U256::from(15514329941501828111_u128)
         );
     }
@@ -1191,55 +1236,73 @@ mod test_cached_results {
             },
             pool_size: U256::from(10000000000000000000000_u128), // 10_000 * 10**18
             decimals: 18,
+            token: Address::from_str("0x0000000000000000000000000000000000000000").unwrap(),
         };
-        let client = reqwest::Client::new();
-        let proposal_info = get_proposal_info(&client, proposal_id).await.unwrap();
+        let proposal_info = get_proposal_info(&pool, proposal_id).await.unwrap();
 
-        let rewards = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+        let cached_values =
+            cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
+                .await
+                .unwrap();
+
+        // Ensure distribution doesn't exceed pool size
+        let votes: Vec<Vote> = get_votes(&pool, &proposal_info.id, &boost_info.params.eligibility)
             .await
             .unwrap();
+        let sum: U256 = votes.iter().fold(U256::from(0), |acc, vote| {
+            acc + get_reward_from_cached_values(
+                cached_values,
+                vote.voting_power,
+                boost_info.decimals,
+                limit,
+            )
+        });
+        assert!(sum <= boost_info.pool_size);
 
-        // Ensure all eligible voters are rewarded
-        assert_eq!(rewards.len(), 237_573); // all voters are eligible
-
-        // Ensure all reward is distributed
-        let sum: U256 = rewards.values().fold(U256::from(0), |acc, x| acc + x);
-        assert_eq!(sum, boost_info.pool_size);
-
-        // Ensure first voter hits the reward limit
+        // Ensure the biggest voter reaches the limit
+        // voter: 0xe0dEDCDb5B5Ef2c82E4AdC60AACC23486A518357, vp: 160806.8675534188
         assert_eq!(
-            *rewards
-                .get(&Address::from_str("0xe0dEDCDb5B5Ef2c82E4AdC60AACC23486A518357").unwrap())
-                .unwrap(),
+            get_reward_from_cached_values(
+                cached_values,
+                160806.8675534188,
+                boost_info.decimals,
+                limit
+            ),
             limit,
         );
 
-        // Pick three values at random
+        // voter: 0x0E457324f0c6125b20392341Cdeb7bf9bCB02322, vp: 80099.00382066128
         assert_eq!(
-            *rewards
-                .get(&Address::from_str("0x0E457324f0c6125b20392341Cdeb7bf9bCB02322").unwrap())
-                .unwrap(),
-            U256::from(196464414774155419006_u128)
+            get_reward_from_cached_values(
+                cached_values,
+                80099.00382066128,
+                boost_info.decimals,
+                limit
+            ),
+            U256::from(196464414774155419005_u128)
         );
-        // User who voted no still gets rewarded
+
+        // voter: 0x31B6BE9b49974A66F1A2C3787B44E694AD13EC27, vp: 5379.420851547202
         assert_eq!(
-            *rewards
-                .get(&Address::from_str("0xB9cF551E73bEC54332D76A7542FdacBb77BFA430").unwrap())
-                .unwrap(),
-            U256::from(27718149939250144849_u128)
-        );
-        assert_eq!(
-            *rewards
-                .get(&Address::from_str("0x31B6BE9b49974A66F1A2C3787B44E694AD13EC27").unwrap())
-                .unwrap(),
+            get_reward_from_cached_values(
+                cached_values,
+                5379.420851547202,
+                boost_info.decimals,
+                limit
+            ),
             U256::from(13194480817631529200_u128)
         );
 
-        let hits = CACHED_WEIGHTED_REWARDS.lock().await.cache_hits().unwrap();
-        let _ = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+        // Ensure cache works fine
+        let hits = CACHED_WEIGHTED_REWARDS_RATIO
+            .lock()
+            .await
+            .cache_hits()
+            .unwrap();
+        let _ = cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
             .await
             .unwrap();
-        assert!(CACHED_WEIGHTED_REWARDS.lock().await.cache_hits() == Some(hits + 1));
+        assert!(CACHED_WEIGHTED_REWARDS_RATIO.lock().await.cache_hits() == Some(hits + 1));
     }
 }
 
