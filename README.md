@@ -15,7 +15,6 @@ To run your own instance:
 ## .env
 
 The following variable environment are required for the guard to run:
-- `HUB_URL`: The url to the snapshot hub
 - `MAINNET_SUBGRAPH_URL`: The url to the mainnet subgraph
 - `SEPOLIA_SUBGRAPH_URL`: The url to the sepolia subgraph
 - `PRIVATE_KEY`: The guard private key

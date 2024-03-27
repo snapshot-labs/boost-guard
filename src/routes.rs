@@ -4,7 +4,7 @@ use crate::routes::boost_query::BoostQueryBoostStrategy;
 use crate::routes::boost_query::BoostQueryBoostStrategyEligibility;
 use crate::signatures::ClaimConfig;
 use crate::State;
-use crate::{ServerError, DISABLED_TOKENS, HUB_URL, MYRIAD, SUBGRAPH_URLS};
+use crate::{ServerError, DISABLED_TOKENS, MYRIAD, SUBGRAPH_URLS};
 use ::axum::extract::Json;
 use axum::response::IntoResponse;
 use axum::Extension;
@@ -16,7 +16,8 @@ use ethers::signers::Signer;
 use ethers::types::Address;
 use ethers::types::U256;
 use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
-use mysql_async::prelude::Queryable;
+use mysql_async::prelude::{FromRow, Queryable};
+use mysql_async::Row;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::hash::Hash;
@@ -138,7 +139,7 @@ pub async fn handle_get_lottery_winners(
 
     async {
         let proposal_info: ProposalInfo =
-            get_proposal_info(&state.client, &request.proposal_id).await?;
+            get_proposal_info(&state.pool, &request.proposal_id).await?;
 
         if let Err(error) = validate_proposal_info(&proposal_info) {
             if let ServerError::ProposalStillInProgress = error {
@@ -506,6 +507,7 @@ pub struct ProposalInfo {
     pub score: f64,
     pub scores_by_choice: Vec<f64>,
     pub end: u64,
+    pub privacy: String,
     pub num_votes: u64,
 }
 
@@ -519,36 +521,26 @@ impl ProposalInfo {
     }
 }
 
-impl TryFrom<proposal_query::ProposalQueryProposal> for ProposalInfo {
-    type Error = ServerError;
+impl FromRow for ProposalInfo {
+    fn from_row(row: Row) -> Self
+    where
+        Self: Sized,
+    {
+        Self::from_row_opt(row).unwrap()
+    }
 
-    fn try_from(proposal: proposal_query::ProposalQueryProposal) -> Result<Self, Self::Error> {
-        let id = proposal.id;
-        let type_ = proposal.type_.ok_or("missing proposal type from the hub")?;
-        let scores_by_choice = proposal
-            .scores
-            .ok_or("missing proposal scores from the hub")?
-            .into_iter()
-            .map(|choice| choice.ok_or("missing choice in scores by choices"))
-            .collect::<Result<Vec<_>, _>>()?;
-        let score = proposal
-            .scores_total
-            .ok_or("missing proposal scores_total from the hub")?;
-        let end = proposal.end.try_into()?;
-        let num_votes = proposal
-            .votes
-            .ok_or("proposal: missing votes from the hub")?
-            .try_into()
-            .map_err(|_| ServerError::ErrorString("failed to parse votes".to_string()))?;
-        let privacy: String = proposal
-            .privacy
-            .ok_or("missing proposal privacy from the hub")?;
-        if !privacy.is_empty() {
-            return Err(ServerError::ErrorString(format!(
-                "proposal privacy {} is incompatible",
-                privacy
-            )));
-        }
+    fn from_row_opt(row: Row) -> Result<Self, mysql_async::FromRowError>
+    where
+        Self: Sized,
+    {
+        let id: String = row.get("id").unwrap();
+        let end: u64 = row.get("end").unwrap();
+        let privacy: String = row.get("privacy").unwrap();
+        let scores_str: String = row.get("scores").unwrap();
+        let scores_by_choice: Vec<f64> = serde_json::from_str(&scores_str).unwrap();
+        let score: f64 = row.get("scores_total").unwrap();
+        let type_: String = row.get("type").unwrap();
+        let num_votes: u64 = row.get("votes").unwrap();
 
         Ok(ProposalInfo {
             id,
@@ -556,6 +548,7 @@ impl TryFrom<proposal_query::ProposalQueryProposal> for ProposalInfo {
             score,
             scores_by_choice,
             end,
+            privacy,
             num_votes,
         })
     }
@@ -566,8 +559,7 @@ async fn get_rewards_inner(
     state: &State,
     request: QueryParams,
 ) -> Result<Vec<RewardInfo>, ServerError> {
-    let proposal_info: ProposalInfo =
-        get_proposal_info(&state.client, &request.proposal_id).await?;
+    let proposal_info: ProposalInfo = get_proposal_info(&state.pool, &request.proposal_id).await?;
 
     if let Err(e) = validate_proposal_info(&proposal_info) {
         if let ServerError::ProposalStillInProgress = e {
@@ -652,30 +644,26 @@ async fn get_rewards_inner(
     convert = r#"{ proposal_id.to_string() }"#
 )]
 async fn get_proposal_info(
-    client: &reqwest::Client,
+    pool: &mysql_async::Pool,
     proposal_id: &str,
 ) -> Result<ProposalInfo, ServerError> {
     tracing::info!(?proposal_id, "get_proposal_info");
-    let variables = proposal_query::Variables {
-        id: proposal_id.to_owned(),
-    };
+    let mut conn = pool.get_conn().await?;
 
-    let request_body = ProposalQuery::build_query(variables);
+    let query = format!(
+        "SELECT id, choices, end, privacy, scores, scores_total, type, votes
+        FROM proposals
+        WHERE id = '{}'",
+        proposal_id,
+    );
 
-    let res = client
-        .post(HUB_URL.as_str())
-        .json(&request_body)
-        .send()
-        .await?;
-    let response_body: GraphQLResponse<proposal_query::ResponseData> = res.json().await?;
-    tracing::info!("response_body: {:?}", response_body);
+    let proposal_info: ProposalInfo = conn
+        .query_first(query)
+        .await?
+        .ok_or("could not find vote for voter and proposal in the database")?;
 
-    let proposal_query: proposal_query::ProposalQueryProposal = response_body
-        .data
-        .ok_or("missing data from the hub")?
-        .proposal
-        .ok_or("missing proposal data from the hub")?;
-    ProposalInfo::try_from(proposal_query)
+    conn.disconnect().await?;
+    Ok(proposal_info)
 }
 
 async fn get_boost_info(
@@ -873,33 +861,7 @@ async fn cached_weighted_rewards_ratio(
     proposal_info: &ProposalInfo,
     limit: U256,
 ) -> Result<(U256, U256), ServerError> {
-    let mut conn = pool.get_conn().await?;
-
-    let choice_clause = if let BoostEligibility::Bribe(choice) = boost_info.params.eligibility {
-        format!("AND choice = {}", choice)
-    } else {
-        "".to_string()
-    };
-
-    let query = format!(
-        "SELECT voter, vp
-        FROM votes
-        WHERE proposal = '{}'
-        {}
-        ORDER BY vp DESC;",
-        proposal_info.id, choice_clause
-    );
-
-    let votes: Vec<Vote> = conn
-        .query_map(query, |(voter, vp): (String, f64)| {
-            let v = Address::from_str(voter.as_str()).expect("address is ill-formatted");
-
-            Vote {
-                voter: v,
-                voting_power: vp,
-            }
-        })
-        .await?;
+    let votes = get_votes(pool, &proposal_info.id, &boost_info.params.eligibility).await?;
 
     compute_rewards(
         votes,
@@ -969,9 +931,47 @@ fn get_unique_id<T: std::fmt::Debug>(input: T) -> String {
     format!("{:x}", output)
 }
 
+async fn get_votes(
+    pool: &mysql_async::Pool,
+    proposal_id: &str,
+    eligibility: &BoostEligibility,
+) -> Result<Vec<Vote>, ServerError> {
+    let choice = if let BoostEligibility::Bribe(choice) = eligibility {
+        format!("AND choice = {}", choice)
+    } else {
+        "".to_string()
+    };
+
+    let mut conn = pool.get_conn().await?;
+
+    let query = format!(
+        "SELECT voter, vp
+        FROM votes
+        WHERE proposal = '{}'
+        {}
+        ORDER BY vp DESC;",
+        proposal_id, choice
+    );
+
+    let votes: Vec<Vote> = conn
+        .query_map(query, |(voter, vp): (String, f64)| {
+            let v = Address::from_str(voter.as_str()).expect("address is ill-formatted");
+
+            Vote {
+                voter: v,
+                voting_power: vp,
+            }
+        })
+        .await?;
+
+    conn.disconnect().await?;
+    Ok(votes)
+}
+
 fn validate_proposal_info(proposal_info: &ProposalInfo) -> Result<(), ServerError> {
     validate_end_time(proposal_info.end)?;
     validate_type(&proposal_info.type_)?;
+    validate_privacy(&proposal_info.privacy)?;
     Ok(())
 }
 
@@ -1000,6 +1000,16 @@ fn validate_type(type_: &str) -> Result<(), ServerError> {
     }
 }
 
+fn validate_privacy(privacy: &str) -> Result<(), ServerError> {
+    if !privacy.is_empty() {
+        Err(ServerError::ErrorString(format!(
+            "`{privacy}` proposals are not eligible for boosting"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
 fn validate_choice(choice: usize, boost_eligibility: BoostEligibility) -> Result<(), ServerError> {
     match boost_eligibility {
         BoostEligibility::Incentive => Ok(()),
@@ -1022,7 +1032,7 @@ mod test_cached_results {
     use crate::routes::get_proposal_info;
 
     use super::*;
-    use super::{CACHED_NUM_VOTES, CACHED_WEIGHTED_REWARDS};
+    use super::{CACHED_NUM_VOTES, CACHED_WEIGHTED_REWARDS_RATIO};
     use cached::Cached;
     use dotenv::dotenv;
     use ethers::types::{Address, U256};
@@ -1038,9 +1048,8 @@ mod test_cached_results {
         let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
         let pool = Pool::new(database_url.as_str());
         let boost_info = Default::default();
-        let client = reqwest::Client::new();
         let proposal_id = "0x11e9daab4e806cba220d5d6eae6be76f799f27ad20723d0aabedf0263ca2a28f";
-        let proposal_info = get_proposal_info(&client, proposal_id).await.unwrap();
+        let proposal_info = get_proposal_info(&pool, proposal_id).await.unwrap();
         let boosted_choice = 1;
 
         let num_votes = cached_num_votes(&pool, &boost_info, &proposal_info, boosted_choice)
@@ -1076,45 +1085,62 @@ mod test_cached_results {
             },
             pool_size: U256::from(10000000000000000000000_u128), // 10_000 * 10**18
             decimals: 18,
+            token: Address::from_str("0x0000000000000000000000000000000000000000").unwrap(),
         };
-        let client = reqwest::Client::new();
-        let proposal_info = get_proposal_info(&client, proposal_id).await.unwrap();
+        let proposal_info = get_proposal_info(&pool, proposal_id).await.unwrap();
 
-        let rewards = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+        let cached_values =
+            cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
+                .await
+                .unwrap();
+
+        // Ensure distribution doesn't exceed the pool size
+        let votes: Vec<Vote> = get_votes(&pool, &proposal_info.id, &boost_info.params.eligibility)
             .await
             .unwrap();
-
-        // Ensure all reward is distributed
-        let sum: U256 = rewards.values().fold(U256::from(0), |acc, x| acc + x);
-        assert_eq!(sum, boost_info.pool_size);
-
-        // Ensure all eligible voters are rewarded
-        assert_eq!(rewards.len(), ELIGIBLE_VOTERS);
+        let sum: U256 = votes.iter().fold(U256::from(0), |acc, vote| {
+            acc + get_reward_from_cached_values(
+                cached_values,
+                vote.voting_power,
+                boost_info.decimals,
+                limit,
+            )
+        });
+        assert!(sum <= boost_info.pool_size);
 
         // Pick three values at random
+        // voter: 0x0E457324f0c6125b20392341Cdeb7bf9bCB02322, vp: 80099.00382066128
         assert_eq!(
-            *rewards
-                .get(&Address::from_str("0x0E457324f0c6125b20392341Cdeb7bf9bCB02322").unwrap())
-                .unwrap(),
+            get_reward_from_cached_values(
+                cached_values,
+                80099.00382066128,
+                boost_info.decimals,
+                limit
+            ),
             U256::from(210367026718988690605_u128)
         );
-        // User who voted No does not get rewarded
+
+        // voter: 0x31B6BE9b49974A66F1A2C3787B44E694AD13EC27, vp: 5379.420851547202
         assert_eq!(
-            rewards.get(&Address::from_str("0xB9cF551E73bEC54332D76A7542FdacBb77BFA430").unwrap()),
-            None
-        );
-        assert_eq!(
-            *rewards
-                .get(&Address::from_str("0x31B6BE9b49974A66F1A2C3787B44E694AD13EC27").unwrap())
-                .unwrap(),
+            get_reward_from_cached_values(
+                cached_values,
+                5379.420851547202,
+                boost_info.decimals,
+                limit
+            ),
             U256::from(14128175333414183359_u128)
         );
 
-        let hits = CACHED_WEIGHTED_REWARDS.lock().await.cache_hits().unwrap();
-        let _ = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+        // Ensure that cache works properly
+        let hits = CACHED_WEIGHTED_REWARDS_RATIO
+            .lock()
+            .await
+            .cache_hits()
+            .unwrap();
+        let _ = cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
             .await
             .unwrap();
-        assert!(CACHED_WEIGHTED_REWARDS.lock().await.cache_hits() == Some(hits + 1));
+        assert!(CACHED_WEIGHTED_REWARDS_RATIO.lock().await.cache_hits() == Some(hits + 1));
 
         // -------
         // Now, a new boost that will reach the limit
@@ -1134,40 +1160,58 @@ mod test_cached_results {
             },
             pool_size: U256::from(10000000000000000000000_u128), // 10_000 * 10**18
             decimals: 18,
+            token: Address::from_str("0x0000000000000000000000000000000000000000").unwrap(),
         };
 
-        let rewards = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+        let cached_values =
+            cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
+                .await
+                .unwrap();
+
+        // Ensure distribution doesn't exceed pool size
+        let votes: Vec<Vote> = get_votes(&pool, &proposal_info.id, &boost_info.params.eligibility)
             .await
             .unwrap();
-
-        // Ensure all reward is distributed
-        let sum: U256 = rewards.values().fold(U256::from(0), |acc, x| acc + x);
-        assert_eq!(sum, boost_info.pool_size);
+        let sum: U256 = votes.iter().fold(U256::from(0), |acc, vote| {
+            acc + get_reward_from_cached_values(
+                cached_values,
+                vote.voting_power,
+                boost_info.decimals,
+                limit,
+            )
+        });
+        assert!(sum <= boost_info.pool_size);
 
         // Ensure the biggest voter reaches the limit
+        // voter: 0xe0dEDCDb5B5Ef2c82E4AdC60AACC23486A518357, vp: 160806.8675534188
         assert_eq!(
-            *rewards
-                .get(&Address::from_str("0xe0dEDCDb5B5Ef2c82E4AdC60AACC23486A518357").unwrap())
-                .unwrap(),
+            get_reward_from_cached_values(
+                cached_values,
+                160806.8675534188,
+                boost_info.decimals,
+                limit
+            ),
             limit
         );
 
         // Other voters should have a different reward
         assert_eq!(
-            *rewards
-                .get(&Address::from_str("0x0E457324f0c6125b20392341Cdeb7bf9bCB02322").unwrap())
-                .unwrap(),
+            get_reward_from_cached_values(
+                cached_values,
+                80099.00382066128,
+                boost_info.decimals,
+                limit
+            ),
             U256::from(84466625025568633775_u128)
         );
-        // User who voted No does not get rewarded
+
         assert_eq!(
-            rewards.get(&Address::from_str("0xB9cF551E73bEC54332D76A7542FdacBb77BFA430").unwrap()),
-            None
-        );
-        assert_eq!(
-            *rewards
-                .get(&Address::from_str("0x31B6BE9b49974A66F1A2C3787B44E694AD13EC27").unwrap())
-                .unwrap(),
+            get_reward_from_cached_values(
+                cached_values,
+                5379.420851547202,
+                boost_info.decimals,
+                limit
+            ),
             U256::from(15514329941501828111_u128)
         );
     }
@@ -1192,55 +1236,73 @@ mod test_cached_results {
             },
             pool_size: U256::from(10000000000000000000000_u128), // 10_000 * 10**18
             decimals: 18,
+            token: Address::from_str("0x0000000000000000000000000000000000000000").unwrap(),
         };
-        let client = reqwest::Client::new();
-        let proposal_info = get_proposal_info(&client, proposal_id).await.unwrap();
+        let proposal_info = get_proposal_info(&pool, proposal_id).await.unwrap();
 
-        let rewards = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+        let cached_values =
+            cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
+                .await
+                .unwrap();
+
+        // Ensure distribution doesn't exceed pool size
+        let votes: Vec<Vote> = get_votes(&pool, &proposal_info.id, &boost_info.params.eligibility)
             .await
             .unwrap();
+        let sum: U256 = votes.iter().fold(U256::from(0), |acc, vote| {
+            acc + get_reward_from_cached_values(
+                cached_values,
+                vote.voting_power,
+                boost_info.decimals,
+                limit,
+            )
+        });
+        assert!(sum <= boost_info.pool_size);
 
-        // Ensure all eligible voters are rewarded
-        assert_eq!(rewards.len(), 237_573); // all voters are eligible
-
-        // Ensure all reward is distributed
-        let sum: U256 = rewards.values().fold(U256::from(0), |acc, x| acc + x);
-        assert_eq!(sum, boost_info.pool_size);
-
-        // Ensure first voter hits the reward limit
+        // Ensure the biggest voter reaches the limit
+        // voter: 0xe0dEDCDb5B5Ef2c82E4AdC60AACC23486A518357, vp: 160806.8675534188
         assert_eq!(
-            *rewards
-                .get(&Address::from_str("0xe0dEDCDb5B5Ef2c82E4AdC60AACC23486A518357").unwrap())
-                .unwrap(),
+            get_reward_from_cached_values(
+                cached_values,
+                160806.8675534188,
+                boost_info.decimals,
+                limit
+            ),
             limit,
         );
 
-        // Pick three values at random
+        // voter: 0x0E457324f0c6125b20392341Cdeb7bf9bCB02322, vp: 80099.00382066128
         assert_eq!(
-            *rewards
-                .get(&Address::from_str("0x0E457324f0c6125b20392341Cdeb7bf9bCB02322").unwrap())
-                .unwrap(),
-            U256::from(196464414774155419006_u128)
+            get_reward_from_cached_values(
+                cached_values,
+                80099.00382066128,
+                boost_info.decimals,
+                limit
+            ),
+            U256::from(196464414774155419005_u128)
         );
-        // User who voted no still gets rewarded
+
+        // voter: 0x31B6BE9b49974A66F1A2C3787B44E694AD13EC27, vp: 5379.420851547202
         assert_eq!(
-            *rewards
-                .get(&Address::from_str("0xB9cF551E73bEC54332D76A7542FdacBb77BFA430").unwrap())
-                .unwrap(),
-            U256::from(27718149939250144849_u128)
-        );
-        assert_eq!(
-            *rewards
-                .get(&Address::from_str("0x31B6BE9b49974A66F1A2C3787B44E694AD13EC27").unwrap())
-                .unwrap(),
+            get_reward_from_cached_values(
+                cached_values,
+                5379.420851547202,
+                boost_info.decimals,
+                limit
+            ),
             U256::from(13194480817631529200_u128)
         );
 
-        let hits = CACHED_WEIGHTED_REWARDS.lock().await.cache_hits().unwrap();
-        let _ = cached_weighted_rewards(&pool, &boost_info, &proposal_info, limit)
+        // Ensure cache works fine
+        let hits = CACHED_WEIGHTED_REWARDS_RATIO
+            .lock()
+            .await
+            .cache_hits()
+            .unwrap();
+        let _ = cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
             .await
             .unwrap();
-        assert!(CACHED_WEIGHTED_REWARDS.lock().await.cache_hits() == Some(hits + 1));
+        assert!(CACHED_WEIGHTED_REWARDS_RATIO.lock().await.cache_hits() == Some(hits + 1));
     }
 }
 

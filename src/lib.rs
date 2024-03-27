@@ -19,11 +19,6 @@ extern crate lazy_static;
 pub const MYRIAD: u16 = 10_000;
 
 lazy_static! {
-    static ref HUB_URL: String = {
-        dotenv().ok();
-
-        return env::var("HUB_URL").expect("Please add HUB_URL to your environment or .env file.");
-    };
     static ref SUBGRAPH_URLS: HashMap<&'static str, String> = {
         dotenv().ok();
         let mut map = HashMap::new();
