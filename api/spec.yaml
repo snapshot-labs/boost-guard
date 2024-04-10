@@ -1,0 +1,189 @@
+openapi: 3.0.0
+info:
+  title: Boost Guard API spec
+  description: Describes the different endpoints served by the boost server.
+  version: 0.1.0
+servers:
+  - url: http://boost.snapshot.org
+    description: Live server
+  - url: http://testnet.boost.snapshot.org
+    description: Testnet server
+paths:
+  /get-rewards:
+    post:
+      summary: Returns an array of rewards.
+      description: If an error occured, or if the user has no rewards, returns an empty array.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                proposal_id:
+                  type: string
+                  example: "12"
+                user_address:
+                  type: string
+                  example: "1"
+                boosts:
+                  type: array
+                  description: Array of (boost_id, chain_id) tuples
+                  example: [["12", "1"], ["13", "137"]]
+                  items:
+                    type: array
+                    items:
+                      type: string
+      responses:
+        "200":
+          description: A JSON array of rewards
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    reward:
+                      type: string
+                    boost_id:
+                      type: string
+                    chain_id:
+                      type: string
+                example:
+                  [
+                    {
+                      reward: "1000000000000000000",
+                      boost_id: "12",
+                      chain_id: "1",
+                    },
+                    {
+                      reward: "1200000000000000000",
+                      boost_id: "13",
+                      chain_id: "137",
+                    },
+                  ]
+  /create-vouchers:
+    post:
+      summary: Returns an array of rewards and corresponding vouchers signed by the guard.
+      description: If an error occured, or if the user has no rewards, returns an empty array.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                proposal_id:
+                  type: string
+                  example: "12"
+                user_address:
+                  type: string
+                  example: "1"
+                boosts:
+                  type: array
+                  description: Array of (boost_id, chain_id) tuples
+                  example: [["12", "1"], ["13", "137"]]
+                  items:
+                    type: array
+                    items:
+                      type: string
+      responses:
+        "200":
+          description: A JSON array of rewards and corresponding vouchers.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    reward:
+                      type: string
+                    boost_id:
+                      type: string
+                    chain_id:
+                      type: string
+                    signature:
+                      type: string
+                example:
+                  [
+                    {
+                      reward: "1000000000000000000",
+                      boost_id: "12",
+                      chain_id: "1",
+                      signature: "0x3099eca443b11fbcc85e0e5a772eb0276aceb2060d440edce2474b8bb5e28ce0727180bf08b88030bb0d5ed7592dd36b2c42622777cb485cfa47baae321772eb1c",
+                    },
+                    {
+                      reward: "1200000000000000000",
+                      boost_id: "13",
+                      chain_id: "137",
+                      signature: "0x45ab07fba4858740874e0e5a772eb0276aceb2060d44cba899740000cba17eff727180bf08b88030bb0d5ed7592dd36b2c42622777cb485cfa47baae34569808db",
+                    },
+                  ]
+  /get-lottery-winners:
+    post:
+      summary: Returns the list of winners for a specific boost.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                proposal_id:
+                  type: string
+                  example: "12"
+                user_address:
+                  type: string
+                  example: "1"
+                boosts:
+                  type: array
+                  description: Array of (boost_id, chain_id) tuples
+                  example: [["12", "1"], ["13", "137"]]
+                  items:
+                    type: array
+                    items:
+                      type: string
+      responses:
+        "200":
+          description: A JSON array of rewards
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  winners:
+                    type: array
+                    description: Array of winners
+                    items:
+                      type: string
+                  prize:
+                    type: string
+                  boost_id:
+                    type: string
+                  chain_id:
+                    type: string
+                example:
+                  [
+                    {
+                      winners:
+                        [
+                          "0x225f137127d9067788314bc7fcc1f36746a3c3B5",
+                          "0xeedba2484aaf940f37cd3cd21a5d7c4a7dafbfc0",
+                        ],
+                      prize: "1000000000000000000",
+                      boost_id: "12",
+                      chain_id: "1",
+                    },
+                    {
+                      winners:
+                        [
+                          "0xF1d62a84b150d1178D79FA8F504C944F39cb9248",
+                          "0xeEDBa2484aAF940f37cd3CD21a5D7C4A7DAfbfC0",
+                        ],
+                      prize: "1200000000000000000",
+                      boost_id: "13",
+                      chain_id: "137",
+                    },
+                  ]
