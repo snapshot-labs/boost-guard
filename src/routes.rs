@@ -971,7 +971,9 @@ async fn get_votes(
 fn validate_proposal_info(proposal_info: &ProposalInfo) -> Result<(), ServerError> {
     validate_end_time(proposal_info.end)?;
     validate_type(&proposal_info.type_)?;
-    validate_privacy(&proposal_info.privacy)?;
+
+    // All privacy scopes allowed atm
+    // validate_privacy(&proposal_info.privacy)?;
     Ok(())
 }
 
@@ -1000,6 +1002,7 @@ fn validate_type(type_: &str) -> Result<(), ServerError> {
     }
 }
 
+#[allow(dead_code)]
 fn validate_privacy(privacy: &str) -> Result<(), ServerError> {
     if !privacy.is_empty() {
         Err(ServerError::ErrorString(format!(
