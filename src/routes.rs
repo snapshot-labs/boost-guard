@@ -974,11 +974,6 @@ async fn get_votes(
 
 fn validate_proposal_info(proposal_info: &ProposalInfo) -> Result<(), ServerError> {
     validate_end_time(proposal_info.end)?;
-
-    // Checks here have been deactivated and we now do a check PER boost because the eligibility strategy
-    // affects those checks.
-    // validate_type(&proposal_info.type_)?;
-    // validate_privacy(&proposal_info.privacy)?;
     Ok(())
 }
 
