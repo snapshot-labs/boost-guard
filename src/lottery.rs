@@ -48,7 +48,7 @@ pub async fn cached_lottery_winners(
     );
 
     let mut conn = pool.get_conn().await?;
-    let result: Vec<(String, f64, u32)> = conn.query(query).await?;
+    let result: Vec<(String, f64, String)> = conn.query(query).await?;
     conn.disconnect().await?;
 
     if result.is_empty() {

@@ -217,4 +217,157 @@ mod tests {
             "0x06a85356dcb5b307096726fb86a78c59d38e08ee"
         );
     }
+
+    #[tokio::test]
+    async fn test_get_rewards_ranked_choice() {
+        let app = super::app();
+        let query = QueryParams {
+            proposal_id: "0x930d5fb011f84d16df26c362d820323f0dab111c3b0b91d75151fe12c5ff07fb"
+                .to_string(),
+            voter_address: "0x5ef29cf961cf3fc02551b9bdadaa4418c446c5dd".to_string(),
+            boosts: vec![
+                ("42".to_string(), "11155111".to_string()),
+                ("43".to_string(), "11155111".to_string()),
+            ],
+        };
+
+        let response = app
+            .oneshot(
+                http::Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/get-rewards")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(Body::from(serde_json::to_vec(&query).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let response: Result<Vec<GetRewardsResponse>, _> = serde_json::from_slice(&bytes);
+        if response.is_err() {
+            println!("ERROR: {}", String::from_utf8(bytes.to_vec()).unwrap());
+            panic!();
+        } else {
+            let result = response.unwrap();
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].reward, "15000000000000000000");
+            assert_eq!(result[0].chain_id, "11155111");
+            assert_eq!(result[0].boost_id, "43");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_rewards_shutter() {
+        let app = super::app();
+        let query = QueryParams {
+            proposal_id: "0xdde52de1d892ccc671dcca55504803f87a2297089fd728ef2076af4c1b96ac1c"
+                .to_string(),
+            voter_address: "0x5ef29cf961cf3fc02551b9bdadaa4418c446c5dd".to_string(),
+            boosts: vec![
+                ("44".to_string(), "11155111".to_string()),
+                ("45".to_string(), "11155111".to_string()),
+            ],
+        };
+
+        let response = app
+            .oneshot(
+                http::Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/get-rewards")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(Body::from(serde_json::to_vec(&query).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let response: Result<Vec<GetRewardsResponse>, _> = serde_json::from_slice(&bytes);
+        if response.is_err() {
+            println!("ERROR: {}", String::from_utf8(bytes.to_vec()).unwrap());
+            panic!();
+        } else {
+            let result = response.unwrap();
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].reward, "15000000000000000000");
+            assert_eq!(result[0].chain_id, "11155111");
+            assert_eq!(result[0].boost_id, "45");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_rewards_shutter_and_ranked_choice() {
+        let app = super::app();
+        let query = QueryParams {
+            proposal_id: "0xfcdb01284958142a481fb4d579aa056ed93c29a9f58fbefbfb0504b3c1c06e96"
+                .to_string(),
+            voter_address: "0xc83A9e69012312513328992d454290be85e95101".to_string(),
+            boosts: vec![
+                ("46".to_string(), "11155111".to_string()),
+                ("47".to_string(), "11155111".to_string()),
+            ],
+        };
+
+        let response = app
+            .oneshot(
+                http::Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/get-rewards")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(Body::from(serde_json::to_vec(&query).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let response: Result<Vec<GetRewardsResponse>, _> = serde_json::from_slice(&bytes);
+        if response.is_err() {
+            println!("ERROR: {}", String::from_utf8(bytes.to_vec()).unwrap());
+            panic!();
+        } else {
+            let result = response.unwrap();
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].reward, "15000000000000000000");
+            assert_eq!(result[0].chain_id, "11155111");
+            assert_eq!(result[0].boost_id, "47");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_rewards_shutter_and_ranked_proportional() {
+        let app = super::app();
+        let query = QueryParams {
+            proposal_id: "0xe175412d46744bdb68e61c89492a5d3ebb55a487cf8fc4d35a0d671302babed3"
+                .to_string(),
+            voter_address: "0xc83A9e69012312513328992d454290be85e95101".to_string(),
+            boosts: vec![("49".to_string(), "11155111".to_string())],
+        };
+
+        let response = app
+            .oneshot(
+                http::Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/get-rewards")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(Body::from(serde_json::to_vec(&query).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let response: Result<Vec<GetRewardsResponse>, _> = serde_json::from_slice(&bytes);
+        if response.is_err() {
+            println!("ERROR: {}", String::from_utf8(bytes.to_vec()).unwrap());
+            panic!();
+        } else {
+            let result = response.unwrap();
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].reward, "15000000000000000000");
+            assert_eq!(result[0].chain_id, "11155111");
+            assert_eq!(result[0].boost_id, "49");
+        }
+    }
 }

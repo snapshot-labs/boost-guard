@@ -478,7 +478,7 @@ pub struct Vote {
 pub struct VoteWithChoice {
     pub voter: Address,
     pub voting_power: f64,
-    pub choice: usize,
+    pub choice: String,
 }
 
 impl Default for Vote {
@@ -495,7 +495,7 @@ impl Default for VoteWithChoice {
         Self {
             voter: Address::random(),
             voting_power: 1.0,
-            choice: 1,
+            choice: "1".to_string(),
         }
     }
 }
@@ -607,7 +607,11 @@ async fn get_rewards_inner(
             continue;
         }
 
-        match validate_choice(vote_info.choice, boost_info.params.eligibility) {
+        match validate_choice(
+            &proposal_info,
+            &vote_info.choice,
+            boost_info.params.eligibility,
+        ) {
             Ok(_) => (),
             Err(error) => {
                 tracing::warn!(choice = vote_info.choice, eligibbility = ?boost_info.params.eligibility, ?error);
@@ -713,7 +717,7 @@ async fn get_vote_info(
         proposal_id, voter_address
     );
 
-    let (_voter, voting_power, choice): (String, f64, usize) = conn
+    let (_voter, voting_power, choice): (String, f64, String) = conn
         .query_first(query)
         .await?
         .ok_or("could not find vote for voter and proposal in the database")?;
@@ -970,10 +974,6 @@ async fn get_votes(
 
 fn validate_proposal_info(proposal_info: &ProposalInfo) -> Result<(), ServerError> {
     validate_end_time(proposal_info.end)?;
-    validate_type(&proposal_info.type_)?;
-
-    // All privacy scopes allowed atm
-    // validate_privacy(&proposal_info.privacy)?;
     Ok(())
 }
 
@@ -990,8 +990,6 @@ fn validate_end_time(end: u64) -> Result<(), ServerError> {
     }
 }
 
-// Only single-choice and basic proposals are eligible for boosting.
-// The other types are not supported yet (and not for the near future).
 fn validate_type(type_: &str) -> Result<(), ServerError> {
     if (type_ != "single-choice") && (type_ != "basic") {
         Err(ServerError::ErrorString(format!(
@@ -1002,7 +1000,6 @@ fn validate_type(type_: &str) -> Result<(), ServerError> {
     }
 }
 
-#[allow(dead_code)]
 fn validate_privacy(privacy: &str) -> Result<(), ServerError> {
     if !privacy.is_empty() {
         Err(ServerError::ErrorString(format!(
@@ -1013,10 +1010,24 @@ fn validate_privacy(privacy: &str) -> Result<(), ServerError> {
     }
 }
 
-fn validate_choice(choice: usize, boost_eligibility: BoostEligibility) -> Result<(), ServerError> {
+fn validate_choice(
+    proposal_info: &ProposalInfo,
+    choice: &str,
+    boost_eligibility: BoostEligibility,
+) -> Result<(), ServerError> {
     match boost_eligibility {
-        BoostEligibility::Incentive => Ok(()),
+        BoostEligibility::Incentive => {
+            // All privacy settings allowed
+            // All proposal types allowed
+            Ok(())
+        }
         BoostEligibility::Bribe(boosted_choice) => {
+            // Only public proposals allowed
+            validate_privacy(&proposal_info.privacy)?;
+            // Only single-choice and basic proposals are allowed
+            validate_type(&proposal_info.type_)?;
+
+            let choice: usize = choice.parse().map_err(|_| "failed to parse choice")?;
             if choice != boosted_choice {
                 Err(ServerError::ErrorString(format!(
                     "voter voted {:} but needed to vote {} to be eligible",
