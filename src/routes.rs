@@ -499,6 +499,7 @@ pub struct ProposalInfo {
     pub type_: String,
     pub score: f64,
     pub scores_by_choice: Vec<f64>,
+    pub scores_state: String,
     pub end: u64,
     pub privacy: String,
     pub num_votes: u64,
@@ -551,6 +552,7 @@ impl FromRow for ProposalInfo {
         let privacy: String = row.get("privacy").unwrap();
         let scores_str: String = row.get("scores").unwrap();
         let scores_by_choice: Vec<f64> = serde_json::from_str(&scores_str).unwrap();
+        let scores_state: String = row.get("scores_state").unwrap();
         let score: f64 = row.get("scores_total").unwrap();
         let type_: String = row.get("type").unwrap();
         let num_votes: u64 = row.get("votes").unwrap();
@@ -560,6 +562,7 @@ impl FromRow for ProposalInfo {
             type_,
             score,
             scores_by_choice,
+            scores_state,
             end,
             privacy,
             num_votes,
@@ -664,7 +667,7 @@ async fn get_proposal_info(
     let mut conn = pool.get_conn().await?;
 
     let query = format!(
-        "SELECT id, choices, end, privacy, scores, scores_total, type, votes
+        "SELECT id, choices, end, privacy, scores, scores_total, scores_state, type, votes
         FROM proposals
         WHERE id = '{}'",
         proposal_id,
@@ -999,7 +1002,16 @@ async fn get_votes(
 
 fn validate_proposal_info(proposal_info: &ProposalInfo) -> Result<(), ServerError> {
     validate_end_time(proposal_info.end)?;
+    validate_status(&proposal_info.scores_state)?;
     Ok(())
+}
+
+fn validate_status(status: &str) -> Result<(), ServerError> {
+    if status != "final" {
+        Err(ServerError::ProposalStillInProgress)
+    } else {
+        Ok(())
+    }
 }
 
 // We don't need to validate start_time because the smart-contract will do it anyway.
@@ -1015,26 +1027,6 @@ fn validate_end_time(end: u64) -> Result<(), ServerError> {
     }
 }
 
-fn validate_type(type_: &str) -> Result<(), ServerError> {
-    if (type_ != "single-choice") && (type_ != "basic") {
-        Err(ServerError::ErrorString(format!(
-            "`{type_:}` proposals are not eligible for boosting"
-        )))
-    } else {
-        Ok(())
-    }
-}
-
-fn validate_privacy(privacy: &str) -> Result<(), ServerError> {
-    if !privacy.is_empty() {
-        Err(ServerError::ErrorString(format!(
-            "`{privacy}` proposals are not eligible for boosting"
-        )))
-    } else {
-        Ok(())
-    }
-}
-
 fn validate_choice(
     proposal_info: &ProposalInfo,
     choice: &str,
@@ -1044,14 +1036,27 @@ fn validate_choice(
         BoostEligibility::Incentive => {
             // All privacy settings allowed
             // All proposal types allowed
+
             Ok(())
         }
         BoostEligibility::Bribe(boosted_choice) => {
             // Only public proposals allowed
-            validate_privacy(&proposal_info.privacy)?;
-            // Only single-choice and basic proposals are allowed
-            validate_type(&proposal_info.type_)?;
+            if !proposal_info.privacy.is_empty() {
+                return Err(ServerError::ErrorString(format!(
+                    "`{:?}` proposals are not eligible for boosting",
+                    proposal_info.privacy
+                )));
+            }
 
+            // Only single-choice and basic proposals are allowed
+            if (proposal_info.type_ != "single-choice") && (proposal_info.type_ != "basic") {
+                return Err(ServerError::ErrorString(format!(
+                    "`{:}` proposals are not eligible for boosting",
+                    proposal_info.type_
+                )));
+            }
+
+            // Ensure the voter voted for the boosted choice
             let choice: usize = choice.parse().map_err(|_| "failed to parse choice")?;
             if choice != boosted_choice {
                 Err(ServerError::ErrorString(format!(
@@ -1063,11 +1068,21 @@ fn validate_choice(
             }
         }
         BoostEligibility::BribeWinningOutcome => {
+            // All privacy settings are allowed
+            // Only single-choice and basic proposals are allowed
+            if (proposal_info.type_ != "single-choice") && (proposal_info.type_ != "basic") {
+                return Err(ServerError::ErrorString(format!(
+                    "`{:}` proposals are not eligible for boosting",
+                    proposal_info.type_
+                )));
+            }
+
             // Get the winning choice
             let winning_choice = proposal_info.get_winning_choice();
 
             let choice: usize = choice.parse().map_err(|_| "failed to parse choice")?;
-            // compare it to the voter's choice
+
+            // Compare it to the voter's choice
             if choice != winning_choice {
                 Err(ServerError::ErrorString(format!(
                     "voter voted {:} but needed to vote {} to be eligible",
