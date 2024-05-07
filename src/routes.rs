@@ -368,17 +368,8 @@ pub struct BoostParams {
 pub enum BoostEligibility {
     #[default]
     Incentive, // Everyone who votes is eligible, regardless of choice
-    Bribe(usize), // Only those who voted for the specific choice are eligible
-}
-
-impl BoostEligibility {
-    pub fn boosted_choice(&self) -> Option<usize> {
-        if let BoostEligibility::Bribe(choice) = self {
-            Some(*choice)
-        } else {
-            None
-        }
-    }
+    Bribe(usize),        // Only those who voted for the specific choice are eligible
+    BribeWinningOutcome, // Only those who voted for the winning outcome are eligible
 }
 
 impl TryFrom<BoostQueryBoostStrategyEligibility> for BoostEligibility {
@@ -394,9 +385,11 @@ impl TryFrom<BoostQueryBoostStrategyEligibility> for BoostEligibility {
                     .parse()
                     .map_err(|_| "failed to parse choice")?;
                 if choice == 0 {
-                    return Err("invalid choice: 0");
+                    // A choice of `0` indicates that the winning choice should be bribed
+                    Ok(BoostEligibility::BribeWinningOutcome)
+                } else {
+                    Ok(BoostEligibility::Bribe(choice))
                 }
-                Ok(BoostEligibility::Bribe(choice))
             }
             _ => Err("invalid eligibility"),
         }
@@ -512,11 +505,31 @@ pub struct ProposalInfo {
 }
 
 impl ProposalInfo {
-    fn get_score(&self, eligibility: BoostEligibility) -> f64 {
-        if let Some(choice) = eligibility.boosted_choice() {
-            self.scores_by_choice[choice - 1]
-        } else {
-            self.score
+    fn get_score(&self, eligibility: BoostEligibility, choice: &str) -> f64 {
+        match eligibility {
+            BoostEligibility::Incentive => self.score,
+            BoostEligibility::Bribe(_) | BoostEligibility::BribeWinningOutcome => {
+                let choice: usize = choice.parse().expect("choice should be a number"); // TODO: log error ?
+                self.scores_by_choice[choice - 1]
+            }
+        }
+    }
+
+    fn get_winning_choice(&self) -> usize {
+        self.scores_by_choice
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.total_cmp(b))
+            .map(|(i, _)| i)
+            .unwrap()
+            + 1 // Adding +1 because the `choice` is 1-indexed on the hub side
+    }
+
+    pub fn get_bribed_choice(&self, eligibility: &BoostEligibility) -> Option<usize> {
+        match eligibility {
+            BoostEligibility::Incentive => None,
+            BoostEligibility::Bribe(choice) => Some(*choice),
+            BoostEligibility::BribeWinningOutcome => Some(self.get_winning_choice()),
         }
     }
 }
@@ -607,11 +620,7 @@ async fn get_rewards_inner(
             continue;
         }
 
-        match validate_choice(
-            &proposal_info,
-            &vote_info.choice,
-            boost_info.params.eligibility,
-        ) {
+        match validate_choice(&proposal_info, &vote_info.choice, &boost_info) {
             Ok(_) => (),
             Err(error) => {
                 tracing::warn!(choice = vote_info.choice, eligibbility = ?boost_info.params.eligibility, ?error);
@@ -739,10 +748,14 @@ async fn get_user_reward(
 ) -> Result<U256, ServerError> {
     match &boost_info.params.distribution {
         DistributionType::Even => {
-            if let Some(boosted_choice) = boost_info.params.eligibility.boosted_choice() {
+            if proposal_info
+                .get_bribed_choice(&boost_info.params.eligibility)
+                .is_some()
+            {
                 // Only count the number of votes that voted for the boosted choice
-                let num_votes = cached_num_votes(pool, boost_info, proposal_info, boosted_choice);
-                Ok(boost_info.pool_size / num_votes.await?)
+                let num_votes =
+                    cached_num_votes(pool, boost_info, proposal_info, &vote_info.choice).await?;
+                Ok(boost_info.pool_size / num_votes)
             } else {
                 Ok(boost_info.pool_size / (U256::from(proposal_info.num_votes)))
             }
@@ -753,7 +766,8 @@ async fn get_user_reward(
             } else {
                 let pow = cached_pow(boost_info.decimals);
                 let score = U256::from(
-                    (proposal_info.get_score(boost_info.params.eligibility) * pow) as u128,
+                    (proposal_info.get_score(boost_info.params.eligibility, &vote_info.choice)
+                        * pow) as u128,
                 );
                 let voting_power = U256::from((vote_info.voting_power * pow) as u128);
                 Ok((voting_power * boost_info.pool_size) / score)
@@ -782,7 +796,7 @@ async fn cached_num_votes(
     pool: &mysql_async::Pool,
     _boost_info: &BoostInfo,
     proposal_info: &ProposalInfo,
-    boosted_choice: usize,
+    boosted_choice: &str,
 ) -> Result<u32, ServerError> {
     let query = format!(
         "
@@ -821,7 +835,7 @@ async fn get_weighted_reward(
     limit: U256,
 ) -> Result<U256, ServerError> {
     let cached_values =
-        cached_weighted_rewards_ratio(pool, boost_info, proposal_info, limit).await?;
+        cached_weighted_rewards_ratio(pool, boost_info, proposal_info, vote_info, limit).await?;
 
     Ok(get_reward_from_cached_values(
         cached_values,
@@ -863,15 +877,26 @@ async fn cached_weighted_rewards_ratio(
     pool: &mysql_async::Pool,
     boost_info: &BoostInfo,
     proposal_info: &ProposalInfo,
+    vote_info: &VoteWithChoice,
     limit: U256,
 ) -> Result<(U256, U256), ServerError> {
-    let votes = get_votes(pool, &proposal_info.id, &boost_info.params.eligibility).await?;
+    let bribed_choice = match boost_info.params.eligibility {
+        BoostEligibility::Incentive => None,
+        BoostEligibility::Bribe(c) => {
+            // Assign the string to a variable to avoid the borrow checker
+            Some(c)
+        }
+        BoostEligibility::BribeWinningOutcome => {
+            unimplemented!("get cached bribed winning choice")
+        }
+    };
+    let votes = get_votes(pool, &proposal_info.id, bribed_choice).await?;
 
     compute_rewards(
         votes,
         boost_info.pool_size,
         boost_info.decimals,
-        proposal_info.get_score(boost_info.params.eligibility),
+        proposal_info.get_score(boost_info.params.eligibility, &vote_info.choice),
         limit,
     )
 }
@@ -938,9 +963,9 @@ fn get_unique_id<T: std::fmt::Debug>(input: T) -> String {
 async fn get_votes(
     pool: &mysql_async::Pool,
     proposal_id: &str,
-    eligibility: &BoostEligibility,
+    bribed_choice: Option<usize>,
 ) -> Result<Vec<Vote>, ServerError> {
-    let choice = if let BoostEligibility::Bribe(choice) = eligibility {
+    let choice_constraint = if let Some(choice) = bribed_choice {
         format!("AND choice = {}", choice)
     } else {
         "".to_string()
@@ -954,7 +979,7 @@ async fn get_votes(
         WHERE proposal = '{}'
         {}
         ORDER BY vp DESC;",
-        proposal_id, choice
+        proposal_id, choice_constraint
     );
 
     let votes: Vec<Vote> = conn
@@ -1013,9 +1038,9 @@ fn validate_privacy(privacy: &str) -> Result<(), ServerError> {
 fn validate_choice(
     proposal_info: &ProposalInfo,
     choice: &str,
-    boost_eligibility: BoostEligibility,
+    boost_info: &BoostInfo,
 ) -> Result<(), ServerError> {
-    match boost_eligibility {
+    match boost_info.params.eligibility {
         BoostEligibility::Incentive => {
             // All privacy settings allowed
             // All proposal types allowed
@@ -1032,6 +1057,21 @@ fn validate_choice(
                 Err(ServerError::ErrorString(format!(
                     "voter voted {:} but needed to vote {} to be eligible",
                     choice, boosted_choice
+                )))
+            } else {
+                Ok(())
+            }
+        }
+        BoostEligibility::BribeWinningOutcome => {
+            // Get the winning choice
+            let winning_choice = proposal_info.get_winning_choice();
+
+            let choice: usize = choice.parse().map_err(|_| "failed to parse choice")?;
+            // compare it to the voter's choice
+            if choice != winning_choice {
+                Err(ServerError::ErrorString(format!(
+                    "voter voted {:} but needed to vote {} to be eligible",
+                    choice, winning_choice
                 )))
             } else {
                 Ok(())
