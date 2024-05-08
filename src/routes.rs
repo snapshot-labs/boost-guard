@@ -521,20 +521,29 @@ impl ProposalInfo {
             return Err("no choices");
         }
 
-        // Return an error if two scores are equal
-        if self.scores_by_choice.windows(2).any(|w| w[0] == w[1]) {
-            return Err("scores are equal");
-        }
+        let index = self
+            .scores_by_choice
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.total_cmp(b))
+            .map(|(i, _)| i)
+            .unwrap()
+            + 1; // Adding +1 because the `choice` is 1-indexed on the hub side
 
-        Ok(Some(
-            self.scores_by_choice
-                .iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.total_cmp(b))
-                .map(|(i, _)| i)
-                .unwrap()
-                + 1, // Adding +1 because the `choice` is 1-indexed on the hub side
-        ))
+        let highest_score = self.scores_by_choice[index - 1];
+
+        // Return an error if the highest score appears more than once
+        if self
+            .scores_by_choice
+            .iter()
+            .filter(|&s| *s == highest_score)
+            .count()
+            > 1
+        {
+            Err("proposal ended in a draw")
+        } else {
+            Ok(Some(index))
+        }
     }
 
     pub fn get_bribed_choice(&self, eligibility: &BoostEligibility) -> Result<Option<usize>, &str> {
