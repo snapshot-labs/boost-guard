@@ -754,6 +754,7 @@ async fn get_vote_info(
     })
 }
 
+/// Make sure you have validate the proposal_info (proposal status, end timetstamp, etc) and vote_info (voter voted correctly) before calling this function
 async fn get_user_reward(
     pool: &mysql_async::Pool,
     boost_info: &BoostInfo,
@@ -1631,9 +1632,7 @@ mod test_compute_rewards {
 
 #[cfg(test)]
 mod test_compute_user_reward {
-    use super::BoostParams;
-    use super::{get_user_reward, DistributionType};
-    use super::{BoostInfo, ProposalInfo, VoteWithChoice};
+    use super::*;
     use ethers::types::{Address, U256};
     use std::str::FromStr;
 
@@ -1860,5 +1859,79 @@ mod test_compute_user_reward {
             .unwrap();
 
         assert_eq!(reward, pool_size);
+    }
+
+    #[tokio::test]
+    async fn test_bribe_winning_choice() {
+        let pool = mysql_async::Pool::new("mysql://username:password@toto:3306/db");
+        let proposal_id =
+            "0x6bef2bfe6e21e1741e730811e629fd51b356683f972b7c474242384eee8c4ee2".to_string();
+        let boost_info = BoostInfo {
+            id: 1,
+            chain_id: U256::from(11155111),
+            params: BoostParams {
+                version: "1".to_string(),
+                proposal: proposal_id.clone(),
+                eligibility: BoostEligibility::BribeWinningOutcome,
+                distribution: DistributionType::Weighted(None),
+            },
+            pool_size: U256::from(10000000000000000000000_u128), // 10_000 * 10**18
+            decimals: 18,
+            token: Address::random(),
+            ..Default::default()
+        };
+
+        let proposal_info = ProposalInfo {
+            id: proposal_id.clone(),
+            score: 3.0,
+            num_votes: 3, // 3 votes total
+            scores_by_choice: vec![1.0, 2.0],
+            privacy: "public".to_string(),
+            type_: "single-choice".to_string(),
+            end: 1709820900,
+            scores_state: "final".to_string(),
+        };
+
+        let votes = vec![
+            VoteWithChoice {
+                voter: "0x3901D0fDe202aF1427216b79f5243f8A022d68cf"
+                    .parse()
+                    .unwrap(),
+                voting_power: 1.0,
+                choice: "2".to_string(),
+            },
+            VoteWithChoice {
+                voter: "0xeF8305E140ac520225DAf050e2f71d5fBcC543e7"
+                    .parse()
+                    .unwrap(),
+                voting_power: 1.0,
+                choice: "2".to_string(),
+            },
+            VoteWithChoice {
+                voter: "0x5EF29cf961cf3Fc02551B9BdaDAa4418c446c5dd"
+                    .parse()
+                    .unwrap(),
+                voting_power: 1.0,
+                choice: "1".to_string(),
+            },
+        ];
+
+        let reward = get_user_reward(&pool, &boost_info, &proposal_info, &votes[0])
+            .await
+            .unwrap();
+        assert_eq!(reward, boost_info.pool_size / 2);
+
+        // Prior to calling `get_user_reward`, the app will call `validate_choice`. Let's try it here on someone who has not voted
+        // for the correct outcome
+        assert_eq!(
+            validate_choice(&proposal_info, &votes[2].choice, &boost_info).unwrap_err(),
+            ServerError::ErrorString(
+                "voter voted 1 but needed to vote 2 to be eligible".to_string()
+            )
+        );
+
+        // Now assert this function works fine for someone who voted for the correct outcome
+        validate_choice(&proposal_info, &votes[0].choice, &boost_info)
+            .expect("should have succeeded");
     }
 }
