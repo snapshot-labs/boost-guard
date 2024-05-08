@@ -516,21 +516,32 @@ impl ProposalInfo {
         }
     }
 
-    fn get_winning_choice(&self) -> usize {
-        self.scores_by_choice
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.total_cmp(b))
-            .map(|(i, _)| i)
-            .unwrap()
-            + 1 // Adding +1 because the `choice` is 1-indexed on the hub side
+    fn get_winning_choice(&self) -> Result<Option<usize>, &str> {
+        if self.scores_by_choice.is_empty() {
+            return Err("no choices");
+        }
+
+        // Return an error if two scores are equal
+        if self.scores_by_choice.windows(2).any(|w| w[0] == w[1]) {
+            return Err("scores are equal");
+        }
+
+        Ok(Some(
+            self.scores_by_choice
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.total_cmp(b))
+                .map(|(i, _)| i)
+                .unwrap()
+                + 1, // Adding +1 because the `choice` is 1-indexed on the hub side
+        ))
     }
 
-    pub fn get_bribed_choice(&self, eligibility: &BoostEligibility) -> Option<usize> {
+    pub fn get_bribed_choice(&self, eligibility: &BoostEligibility) -> Result<Option<usize>, &str> {
         match eligibility {
-            BoostEligibility::Incentive => None,
-            BoostEligibility::Bribe(choice) => Some(*choice),
-            BoostEligibility::BribeWinningOutcome => Some(self.get_winning_choice()),
+            BoostEligibility::Incentive => Ok(None),
+            BoostEligibility::Bribe(choice) => Ok(Some(*choice)),
+            BoostEligibility::BribeWinningOutcome => self.get_winning_choice(),
         }
     }
 }
@@ -752,7 +763,7 @@ async fn get_user_reward(
     match &boost_info.params.distribution {
         DistributionType::Even => {
             if proposal_info
-                .get_bribed_choice(&boost_info.params.eligibility)
+                .get_bribed_choice(&boost_info.params.eligibility)?
                 .is_some()
             {
                 // Only count the number of votes that voted for the boosted choice
@@ -926,6 +937,7 @@ fn compute_rewards(
     let mut score = votes.iter().fold(U256::from(0), |acc, vote_info| {
         acc + U256::from((vote_info.voting_power * pow) as u128)
     });
+    println!("score sum: {:?}", score);
     tracing::info!(total_score = ?score);
 
     // TODO: optimize: we could check if the first voter reaches limit. If he doesn't, then we can simplify the computation.
@@ -1078,7 +1090,9 @@ fn validate_choice(
             }
 
             // Get the winning choice
-            let winning_choice = proposal_info.get_winning_choice();
+            let winning_choice = proposal_info
+                .get_winning_choice()?
+                .expect("should have a winning choice");
 
             let choice: usize = choice.parse().map_err(|_| "failed to parse choice")?;
 
@@ -1119,7 +1133,7 @@ mod test_cached_results {
         let boost_info = Default::default();
         let proposal_id = "0x11e9daab4e806cba220d5d6eae6be76f799f27ad20723d0aabedf0263ca2a28f";
         let proposal_info = get_proposal_info(&pool, proposal_id).await.unwrap();
-        let boosted_choice = 1;
+        let boosted_choice = "1";
 
         let num_votes = cached_num_votes(&pool, &boost_info, &proposal_info, boosted_choice)
             .await
@@ -1142,6 +1156,7 @@ mod test_cached_results {
         let pool = Pool::new(database_url.as_str());
         let limit = U256::from(10000000000000000000000_u128);
         let proposal_id = "0x11e9daab4e806cba220d5d6eae6be76f799f27ad20723d0aabedf0263ca2a28f";
+        let boosted_choice = "1";
         let boost_info = BoostInfo {
             id: 1,
             chain_id: U256::from(11155111),
@@ -1149,7 +1164,7 @@ mod test_cached_results {
             params: BoostParams {
                 version: "1".to_string(),
                 proposal: proposal_id.to_string(),
-                eligibility: BoostEligibility::Bribe(1),
+                eligibility: BoostEligibility::Bribe(boosted_choice.parse().unwrap()),
                 distribution: DistributionType::Weighted(Some(limit)),
             },
             pool_size: U256::from(10000000000000000000000_u128), // 10_000 * 10**18
@@ -1157,16 +1172,22 @@ mod test_cached_results {
             token: Address::from_str("0x0000000000000000000000000000000000000000").unwrap(),
         };
         let proposal_info = get_proposal_info(&pool, proposal_id).await.unwrap();
+        println!("scores: {:?}", proposal_info.scores_by_choice);
+        println!("total score: {:?}", proposal_info.score);
+
+        // used only to retrieve the "choice" value
+        let fake_vote = VoteWithChoice {
+            choice: boosted_choice.to_string(),
+            ..Default::default()
+        };
 
         let cached_values =
-            cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
+            cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, &fake_vote, limit)
                 .await
                 .unwrap();
 
         // Ensure distribution doesn't exceed the pool size
-        let votes: Vec<Vote> = get_votes(&pool, &proposal_info.id, &boost_info.params.eligibility)
-            .await
-            .unwrap();
+        let votes: Vec<Vote> = get_votes(&pool, &proposal_info.id, Some(1)).await.unwrap();
         let sum: U256 = votes.iter().fold(U256::from(0), |acc, vote| {
             acc + get_reward_from_cached_values(
                 cached_values,
@@ -1206,9 +1227,10 @@ mod test_cached_results {
             .await
             .cache_hits()
             .unwrap();
-        let _ = cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
-            .await
-            .unwrap();
+        let _ =
+            cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, &fake_vote, limit)
+                .await
+                .unwrap();
         assert!(CACHED_WEIGHTED_REWARDS_RATIO.lock().await.cache_hits() == Some(hits + 1));
 
         // -------
@@ -1224,7 +1246,7 @@ mod test_cached_results {
             params: BoostParams {
                 version: "1".to_string(),
                 proposal: proposal_id.to_string(),
-                eligibility: BoostEligibility::Bribe(1),
+                eligibility: BoostEligibility::Bribe(boosted_choice.parse().unwrap()),
                 distribution: DistributionType::Weighted(Some(limit)),
             },
             pool_size: U256::from(10000000000000000000000_u128), // 10_000 * 10**18
@@ -1233,14 +1255,18 @@ mod test_cached_results {
         };
 
         let cached_values =
-            cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
+            cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, &fake_vote, limit)
                 .await
                 .unwrap();
 
         // Ensure distribution doesn't exceed pool size
-        let votes: Vec<Vote> = get_votes(&pool, &proposal_info.id, &boost_info.params.eligibility)
-            .await
-            .unwrap();
+        let votes: Vec<Vote> = get_votes(
+            &pool,
+            &proposal_info.id,
+            Some(boosted_choice.parse().unwrap()),
+        )
+        .await
+        .unwrap();
         let sum: U256 = votes.iter().fold(U256::from(0), |acc, vote| {
             acc + get_reward_from_cached_values(
                 cached_values,
@@ -1293,6 +1319,7 @@ mod test_cached_results {
         let pool = Pool::new(database_url.as_str());
         let limit = U256::from(384012049357245359479_u128); // 394012049357245359479 is the reward for the first voter, with no limit. We simply go from 39 to 38.
         let proposal_id = "0x11e9daab4e806cba220d5d6eae6be76f799f27ad20723d0aabedf0263ca2a28f";
+        let boosted_choice = "1";
         let boost_info = BoostInfo {
             id: 3,
             chain_id: U256::from(11155111),
@@ -1309,15 +1336,25 @@ mod test_cached_results {
         };
         let proposal_info = get_proposal_info(&pool, proposal_id).await.unwrap();
 
+        // Needed by the function but not used
+        let fake_vote = VoteWithChoice {
+            choice: boosted_choice.to_string(),
+            ..Default::default()
+        };
+
         let cached_values =
-            cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
+            cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, &fake_vote, limit)
                 .await
                 .unwrap();
 
         // Ensure distribution doesn't exceed pool size
-        let votes: Vec<Vote> = get_votes(&pool, &proposal_info.id, &boost_info.params.eligibility)
-            .await
-            .unwrap();
+        let votes: Vec<Vote> = get_votes(
+            &pool,
+            &proposal_info.id,
+            Some(boosted_choice.parse().unwrap()),
+        )
+        .await
+        .unwrap();
         let sum: U256 = votes.iter().fold(U256::from(0), |acc, vote| {
             acc + get_reward_from_cached_values(
                 cached_values,
@@ -1368,9 +1405,10 @@ mod test_cached_results {
             .await
             .cache_hits()
             .unwrap();
-        let _ = cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, limit)
-            .await
-            .unwrap();
+        let _ =
+            cached_weighted_rewards_ratio(&pool, &boost_info, &proposal_info, &fake_vote, limit)
+                .await
+                .unwrap();
         assert!(CACHED_WEIGHTED_REWARDS_RATIO.lock().await.cache_hits() == Some(hits + 1));
     }
 }

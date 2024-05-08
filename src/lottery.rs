@@ -31,7 +31,7 @@ pub async fn cached_lottery_winners(
     num_winners: u32,
     limit: Option<u16>,
 ) -> Result<HashMap<Address, U256>, ServerError> {
-    let bribed_choice = proposal_info.get_bribed_choice(&boost_info.params.eligibility);
+    let bribed_choice = proposal_info.get_bribed_choice(&boost_info.params.eligibility)?;
 
     let choice_constraint = if let Some(choice) = bribed_choice {
         format!("AND choice = {}", choice)
