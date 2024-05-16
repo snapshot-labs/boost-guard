@@ -385,12 +385,13 @@ impl TryFrom<BoostQueryBoostStrategyEligibility> for BoostEligibility {
                     .parse()
                     .map_err(|_| "failed to parse choice")?;
                 if choice == 0 {
-                    // A choice of `0` indicates that the winning choice should be bribed
-                    Ok(BoostEligibility::BribeWinningOutcome)
+                    // Error
+                    Err("choice cannot be 0")
                 } else {
                     Ok(BoostEligibility::Bribe(choice))
                 }
             }
+            "prediction" => Ok(BoostEligibility::BribeWinningOutcome),
             _ => Err("invalid eligibility"),
         }
     }
