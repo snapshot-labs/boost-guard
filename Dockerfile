@@ -21,6 +21,7 @@ COPY --from=builder /app/target/release/boost-guard /usr/local/bin
 ENV SEPOLIA_SUBGRAPH_URL "https://api.studio.thegraph.com/query/23545/boost-sepolia/version/latest"
 ENV MAINNET_SUBGRAPH_URL "https://api.studio.thegraph.com/query/23545/boost/version/latest"
 ENV POLYGON_SUBGRAPH_URL "https://api.studio.thegraph.com/query/23545/boost-polygon/version/latest"
+ENV BASE_SUBGRAPH_URL "https://api.studio.thegraph.com/query/23545/boost-polygon/version/latest"
 ENV BOOST_NAME "boost"
 ENV BOOST_VERSION "0.1.0"
 ENV VERIFYING_CONTRACT "0x8E8913197114c911F13cfBfCBBD138C1DC74B964"
