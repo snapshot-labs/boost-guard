@@ -4,7 +4,7 @@ env:
   MAINNET_SUBGRAPH_URL: "https://api.studio.thegraph.com/query/23545/boost/version/latest"
   SEPOLIA_SUBGRAPH_URL: "https://api.studio.thegraph.com/query/23545/boost-sepolia/version/latest"
   POLYGON_SUBGRAPH_URL: "https://api.studio.thegraph.com/query/23545/boost-polygon/version/latest"
-  BASE_SUBGRAPH_URL: "https://api.studio.thegraph.com/query/23545/boost-polygon/version/latest"
+  BASE_SUBGRAPH_URL: "https://api.studio.thegraph.com/query/23545/boost-base/version/latest"
   BOOST_NAME: "boost"
   BOOST_VERSION: "0.1.0"
   VERIFYING_CONTRACT: "0x8E8913197114c911F13cfBfCBBD138C1DC74B964"
