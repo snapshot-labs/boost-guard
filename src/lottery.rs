@@ -137,10 +137,23 @@ fn adjust_vote_weights(
         let effective_voting_power =
             std::cmp::min(vp_limit, effective_remaining_score * vp / remaining_score);
 
-        // Subtract the voting power
-        remaining_score -= vp;
-        // Subtract the effective voting power
-        effective_remaining_score -= effective_voting_power;
+        // Subtract the voting power.
+        // To prevent an arithmetic underflow, we check if the voting power is greater than the remaining score.
+        // If it is, this means there's a small rounding error on the last voter.
+        // This happens because the EVM, assembly-script and rust don't handle floats the same way.
+        if vp > remaining_score {
+            remaining_score = U256::from(0);
+        } else {
+            remaining_score -= vp;
+        }
+
+        // Subtract the effective voting power.
+        // Same logic regarding underflows as the comment above.
+        if effective_voting_power > effective_remaining_score {
+            effective_remaining_score = U256::from(0);
+        } else {
+            effective_remaining_score -= effective_voting_power;
+        }
 
         // Update the voter's voting power
         v.voting_power = effective_voting_power.as_u128() as f64 / pow;

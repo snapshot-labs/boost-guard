@@ -15,6 +15,7 @@ use durations::WEEK;
 use ethers::signers::Signer;
 use ethers::types::Address;
 use ethers::types::U256;
+use ethers::utils::to_checksum;
 use graphql_client::{GraphQLQuery, Response as GraphQLResponse};
 use mysql_async::prelude::{FromRow, Queryable};
 use mysql_async::Row;
@@ -179,7 +180,7 @@ pub async fn handle_get_lottery_winners(
             .await?;
 
             let response = GetLotteryWinnersResponse {
-                winners: winners.keys().map(|a| format!("{a:?}")).collect(),
+                winners: winners.keys().map(|a| to_checksum(a, None)).collect(),
                 prize: winners
                     .values()
                     .next()
@@ -697,7 +698,7 @@ async fn get_proposal_info(
     let proposal_info: ProposalInfo = conn
         .query_first(query)
         .await?
-        .ok_or("could not find vote for voter and proposal in the database")?;
+        .ok_or("proposal_info: could not find vote for voter and proposal in the database")?;
 
     conn.disconnect().await?;
     Ok(proposal_info)
@@ -753,7 +754,7 @@ async fn get_vote_info(
     let (_voter, voting_power, choice): (String, f64, String) = conn
         .query_first(query)
         .await?
-        .ok_or("could not find vote for voter and proposal in the database")?;
+        .ok_or("vote_info: could not find vote for voter and proposal in the database")?;
 
     conn.disconnect().await?;
 

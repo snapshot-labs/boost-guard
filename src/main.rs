@@ -69,7 +69,7 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    const WINNER: &str = "0x3901d0fde202af1427216b79f5243f8a022d68cf";
+    const WINNER: &str = "0x3901D0fDe202aF1427216b79f5243f8A022d68cf";
     const PROPOSAL_ID: &str = "0xc3beb923ad594240e964324c07b6ed0828687d149c3ef30085e8ca844cf11ee1";
     const BOOST_ID: &str = "3";
     const CHAIN_ID: &str = "11155111";
@@ -224,7 +224,7 @@ mod tests {
         let query = QueryParams {
             proposal_id: "0x930d5fb011f84d16df26c362d820323f0dab111c3b0b91d75151fe12c5ff07fb"
                 .to_string(),
-            voter_address: "0x5ef29cf961cf3fc02551b9bdadaa4418c446c5dd".to_string(),
+            voter_address: "0x5EF29cf961cf3Fc02551B9BdaDAa4418c446c5dd".to_string(),
             boosts: vec![
                 ("42".to_string(), "11155111".to_string()),
                 ("43".to_string(), "11155111".to_string()),
@@ -263,7 +263,7 @@ mod tests {
         let query = QueryParams {
             proposal_id: "0xdde52de1d892ccc671dcca55504803f87a2297089fd728ef2076af4c1b96ac1c"
                 .to_string(),
-            voter_address: "0x5ef29cf961cf3fc02551b9bdadaa4418c446c5dd".to_string(),
+            voter_address: "0x5EF29cf961cf3Fc02551B9BdaDAa4418c446c5dd".to_string(),
             boosts: vec![
                 ("44".to_string(), "11155111".to_string()),
                 ("45".to_string(), "11155111".to_string()),
