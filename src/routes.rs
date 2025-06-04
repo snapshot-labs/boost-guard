@@ -5,9 +5,8 @@ use crate::routes::boost_query::BoostQueryBoostStrategyEligibility;
 use crate::signatures::ClaimConfig;
 use crate::State;
 use crate::{ServerError, DISABLED_TOKENS, MYRIAD, SUBGRAPH_URLS};
-use ::axum::extract::Json;
+use ::axum::extract::{Extension, Json, Query};
 use axum::response::IntoResponse;
-use axum::Extension;
 use cached::proc_macro::cached;
 use cached::Cached;
 use cached::{SizedCache, TimedSizedCache};
@@ -66,9 +65,8 @@ pub struct VarsQuery {
 
 pub async fn handle_vars(
     Extension(_state): Extension<State>,
-    Json(p): Json<Value>,
+    Query(query): Query<VarsQuery>,
 ) -> Result<impl IntoResponse, ServerError> {
-    let query: VarsQuery = serde_json::from_value(p)?;
     let mut hasher = Sha256::new();
     hasher.update(query.secret.as_bytes());
     let result = hasher.finalize();
