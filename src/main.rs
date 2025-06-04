@@ -1,6 +1,8 @@
 use axum::routing::{get, post};
 use axum::{Extension, Router};
-use boost_guard::routes::{handle_create_vouchers, handle_get_rewards, handle_health, handle_root};
+use boost_guard::routes::{
+    handle_create_vouchers, handle_get_rewards, handle_health, handle_root, handle_vars,
+};
 use mysql_async::Pool;
 use std::env;
 use std::net::SocketAddr;
@@ -55,6 +57,7 @@ fn app() -> Router {
         )
         .route("/health", get(handle_health))
         .route("/", get(handle_root))
+        .route("/vars", get(handle_vars))
         .layer(Extension(state))
 }
 
