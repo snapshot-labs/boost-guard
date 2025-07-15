@@ -6,6 +6,7 @@ use std::env;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use tokio::net::TcpListener;
+use tower_http::cors::{Any, CorsLayer};
 extern crate dotenv;
 
 use dotenv::dotenv;
@@ -46,6 +47,12 @@ fn app() -> Router {
         wallet,
     };
 
+    // Configure CORS
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
     Router::new()
         .route("/create-vouchers", post(handle_create_vouchers))
         .route("/get-rewards", post(handle_get_rewards))
@@ -55,6 +62,7 @@ fn app() -> Router {
         )
         .route("/health", get(handle_health))
         .route("/", get(handle_root))
+        .layer(cors)
         .layer(Extension(state))
 }
 
